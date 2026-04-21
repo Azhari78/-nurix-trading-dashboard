@@ -1,0 +1,59 @@
+services:
+  - type: web
+    name: nurix-trading-dashboard
+    env: python
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+      - key: EXCHANGE_NAME
+        value: gateio
+      - key: SYMBOLS
+        value: BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,TRX/USDT,AVAX/USDT,LINK/USDT
+      - key: DEFAULT_TIMEFRAME
+        value: 1m
+
+      - key: STREAM_SSL_VERIFY
+        value: "true"
+      - key: STREAM_SSL_CA_BUNDLE
+        value: ""
+
+      # Safe defaults for first deploy. Switch to live trading only after validation.
+      - key: AUTO_TRADE_ENABLED
+        value: "true"
+      - key: PAPER_TRADING
+        value: "true"
+      - key: AUTO_TRADE_SYMBOLS
+        value: BTC/USDT
+      - key: TRADE_SIZE_USDT
+        value: "3.5"
+      - key: TRADE_SIZE_PERCENT
+        value: "0"
+      - key: AUTO_TRADE_MIN_NOTIONAL_USDT
+        value: "3.5"
+      - key: AUTO_TRADE_MIN_BUFFER_PCT
+        value: "1.5"
+      - key: STOP_LOSS_PCT
+        value: "4.0"
+      - key: TAKE_PROFIT_PCT
+        value: "4.5"
+      - key: COOLDOWN_SECONDS
+        value: "300"
+      - key: MAX_DAILY_LOSS_USDT
+        value: "20"
+      - key: AUTO_TRADE_MIN_CONFIDENCE
+        value: "55"
+      - key: USE_SANDBOX
+        value: "false"
+
+      # Set these in Render Dashboard for production.
+      - key: API_KEY
+        sync: false
+      - key: API_SECRET
+        sync: false

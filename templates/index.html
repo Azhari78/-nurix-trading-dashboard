@@ -746,7 +746,7 @@
     .wallet-grid {
       display: grid;
       gap: 10px;
-      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
       margin-bottom: 10px;
     }
 
@@ -1072,6 +1072,8 @@
         <article class="auto-box"><span class="k">Status</span><span class="v" id="wallet-status">Waiting...</span></article>
         <article class="auto-box"><span class="k">Exchange</span><span class="v" id="wallet-exchange">-</span></article>
         <article class="auto-box"><span class="k">Est. Total</span><span class="v" id="wallet-total-usdt">-</span></article>
+        <article class="auto-box"><span class="k">Today PnL (Est., UTC)</span><span class="v" id="wallet-daily-pnl">-</span></article>
+        <article class="auto-box"><span class="k">Day Start (Est.)</span><span class="v" id="wallet-day-start">-</span></article>
         <article class="auto-box"><span class="k">USDT Free / Total</span><span class="v" id="wallet-usdt">-</span></article>
         <article class="auto-box"><span class="k">Assets</span><span class="v" id="wallet-asset-count">-</span></article>
       </div>
@@ -1104,6 +1106,7 @@
       <div class="auto-trade-grid">
         <article class="auto-box"><span class="k">Symbols</span><span class="v mono" id="auto-trade-symbols">-</span></article>
         <article class="auto-box"><span class="k">Selected Position</span><span class="v mono" id="auto-trade-selected">-</span></article>
+        <article class="auto-box"><span class="k">Engine Note</span><span class="v" id="auto-trade-note">-</span></article>
       </div>
       <div class="auto-table-wrap">
         <table class="mini-table">

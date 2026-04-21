@@ -59,11 +59,14 @@ const autoTradePnlNode = document.getElementById("auto-trade-pnl");
 const autoTradeRiskNode = document.getElementById("auto-trade-risk");
 const autoTradeSymbolsNode = document.getElementById("auto-trade-symbols");
 const autoTradeSelectedNode = document.getElementById("auto-trade-selected");
+const autoTradeNoteNode = document.getElementById("auto-trade-note");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
 
 const walletStatusNode = document.getElementById("wallet-status");
 const walletExchangeNode = document.getElementById("wallet-exchange");
 const walletTotalNode = document.getElementById("wallet-total-usdt");
+const walletDailyPnlNode = document.getElementById("wallet-daily-pnl");
+const walletDayStartNode = document.getElementById("wallet-day-start");
 const walletUsdtNode = document.getElementById("wallet-usdt");
 const walletAssetCountNode = document.getElementById("wallet-asset-count");
 const walletErrorNode = document.getElementById("wallet-error");
@@ -693,6 +696,7 @@ function renderAutoTrade(payload) {
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
+  const lastReason = String(data.last_reason || "-");
 
   if (autoTradeStatusNode) {
     if (!enabled) {
@@ -744,6 +748,10 @@ function renderAutoTrade(payload) {
     }
   }
 
+  if (autoTradeNoteNode) {
+    autoTradeNoteNode.textContent = lastReason;
+  }
+
   if (!autoTradeEventsNode) return;
 
   if (recentEvents.length === 0) {
@@ -781,6 +789,10 @@ function renderWallet(payload) {
   const connected = Boolean(data.connected);
   const exchange = String(data.exchange || "-").toUpperCase();
   const totalUsdtEstimate = Number(data.total_usdt_estimate);
+  const dailyPnlEstimateUsdt = Number(data.daily_pnl_estimate_usdt);
+  const dailyPnlEstimatePct = Number(data.daily_pnl_estimate_pct);
+  const dayStartTotalUsdt = Number(data.day_start_total_usdt);
+  const pnlDayKey = String(data.pnl_day_key || "");
   const usdtFree = Number(data.usdt_free);
   const usdtTotal = Number(data.usdt_total);
   const assetCount = Number(data.asset_count || 0);
@@ -809,6 +821,36 @@ function renderWallet(payload) {
     walletTotalNode.textContent = Number.isNaN(totalUsdtEstimate)
       ? "-"
       : fmtMoney(totalUsdtEstimate);
+  }
+
+  if (walletDailyPnlNode) {
+    walletDailyPnlNode.classList.remove("pos", "neg");
+    if (Number.isNaN(dailyPnlEstimateUsdt)) {
+      walletDailyPnlNode.textContent = "-";
+    } else {
+      const absMoney = fmtMoney(Math.abs(dailyPnlEstimateUsdt));
+      const moneyText = dailyPnlEstimateUsdt > 0
+        ? `+${absMoney}`
+        : dailyPnlEstimateUsdt < 0
+          ? `-${absMoney}`
+          : fmtMoney(0);
+      const pctText = Number.isNaN(dailyPnlEstimatePct)
+        ? ""
+        : ` (${dailyPnlEstimatePct > 0 ? "+" : ""}${dailyPnlEstimatePct.toFixed(2)}%)`;
+      walletDailyPnlNode.textContent = `${moneyText}${pctText}`;
+
+      if (dailyPnlEstimateUsdt > 0) walletDailyPnlNode.classList.add("pos");
+      if (dailyPnlEstimateUsdt < 0) walletDailyPnlNode.classList.add("neg");
+    }
+  }
+
+  if (walletDayStartNode) {
+    if (Number.isNaN(dayStartTotalUsdt)) {
+      walletDayStartNode.textContent = "-";
+    } else {
+      const keyText = pnlDayKey ? ` (UTC ${pnlDayKey})` : "";
+      walletDayStartNode.textContent = `${fmtMoney(dayStartTotalUsdt)}${keyText}`;
+    }
   }
 
   if (walletUsdtNode) {
