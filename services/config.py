@@ -177,6 +177,9 @@ class Settings:
     auto_trade_strategy_mode: str
     auto_trade_enable_short: bool
     auto_trade_max_open_positions: int
+    auto_trade_auto_convert_to_usdt: bool
+    auto_trade_auto_convert_min_usdt: float
+    auto_trade_auto_convert_interval_seconds: int
     auto_trade_symbol_validation_enabled: bool
     trade_size_usdt_min: float
     trade_size_usdt_max: float
@@ -342,9 +345,27 @@ def load_settings() -> Settings:
         cooldown_min_seconds,
     )
 
-    auto_trade_max_open_positions = max(
-        parse_env_int(os.getenv("AUTO_TRADE_MAX_OPEN_POSITIONS"), 2),
-        1,
+    raw_auto_trade_max_open_positions = parse_env_int(
+        os.getenv("AUTO_TRADE_MAX_OPEN_POSITIONS"),
+        2,
+    )
+    # 0 or negative means unlimited open positions.
+    auto_trade_max_open_positions = (
+        0
+        if raw_auto_trade_max_open_positions <= 0
+        else raw_auto_trade_max_open_positions
+    )
+    auto_trade_auto_convert_to_usdt = parse_env_bool(
+        os.getenv("AUTO_TRADE_AUTO_CONVERT_TO_USDT"),
+        False,
+    )
+    auto_trade_auto_convert_min_usdt = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_CONVERT_MIN_USDT"), 3.0),
+        0.0,
+    )
+    auto_trade_auto_convert_interval_seconds = max(
+        parse_env_int(os.getenv("AUTO_TRADE_AUTO_CONVERT_INTERVAL_SECONDS"), 120),
+        5,
     )
     auto_trade_symbol_validation_enabled = parse_env_bool(
         os.getenv("AUTO_TRADE_SYMBOL_VALIDATION_ENABLED"),
@@ -533,6 +554,9 @@ def load_settings() -> Settings:
         auto_trade_strategy_mode=auto_trade_strategy_mode,
         auto_trade_enable_short=auto_trade_enable_short,
         auto_trade_max_open_positions=auto_trade_max_open_positions,
+        auto_trade_auto_convert_to_usdt=auto_trade_auto_convert_to_usdt,
+        auto_trade_auto_convert_min_usdt=auto_trade_auto_convert_min_usdt,
+        auto_trade_auto_convert_interval_seconds=auto_trade_auto_convert_interval_seconds,
         auto_trade_symbol_validation_enabled=auto_trade_symbol_validation_enabled,
         trade_size_usdt_min=trade_size_usdt_min,
         trade_size_usdt_max=trade_size_usdt_max,

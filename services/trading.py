@@ -632,6 +632,138 @@ class TradingService:
             return (entry_price - current_price) * amount
         return (current_price - entry_price) * amount
 
+    @staticmethod
+    def _base_asset(symbol: str) -> str:
+        return str(symbol or "").split("/", 1)[0].upper()
+
+    def _invalidate_wallet_cache(self) -> None:
+        with self.state.wallet_lock:
+            self.state.wallet_cache["updated_at"] = 0.0
+
+    def _auto_convert_wallet_assets_to_usdt(
+        self,
+        wallet_payload: dict[str, Any] | None,
+        rows_by_symbol: dict[str, dict[str, Any]],
+        now_ts: float,
+    ) -> int:
+        if not self.settings.auto_trade_auto_convert_to_usdt:
+            return 0
+        if self.settings.paper_trading:
+            return 0
+
+        if (
+            now_ts - self.state.auto_trade_last_convert_at
+            < self.settings.auto_trade_auto_convert_interval_seconds
+        ):
+            return 0
+        self.state.auto_trade_last_convert_at = now_ts
+
+        assets = (wallet_payload or {}).get("assets")
+        if not isinstance(assets, list) or not assets:
+            return 0
+
+        open_base_assets = {
+            self._base_asset(symbol)
+            for symbol in self.state.auto_trade_positions.keys()
+        }
+        converted_count = 0
+
+        for entry in assets:
+            asset = str((entry or {}).get("asset") or "").upper().strip()
+            if not asset or asset == "USDT" or asset in open_base_assets:
+                continue
+
+            symbol = f"{asset}/USDT"
+            if symbol not in self._runtime_auto_trade_symbols_set:
+                continue
+
+            free_amount = safe_float((entry or {}).get("free")) or 0.0
+            if free_amount <= 0:
+                continue
+
+            market_row = rows_by_symbol.get(symbol, {})
+            price = safe_float(market_row.get("price"))
+            if price is None or price <= 0:
+                price = safe_float((entry or {}).get("price_usdt"))
+            if price is None or price <= 0:
+                continue
+
+            estimated_usdt = free_amount * price
+            if estimated_usdt < self.settings.auto_trade_auto_convert_min_usdt:
+                continue
+
+            sell_amount = free_amount
+            with suppress(Exception):
+                sell_amount = float(
+                    self.exchange.call("amount_to_precision", symbol, free_amount)
+                )
+            if sell_amount <= 0:
+                continue
+
+            try:
+                order = self.exchange.call(
+                    "create_order",
+                    symbol,
+                    "market",
+                    "sell",
+                    sell_amount,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Auto-convert to USDT failed for %s amount=%s: %s",
+                    symbol,
+                    sell_amount,
+                    exc,
+                )
+                continue
+
+            filled_amount = safe_float(order.get("filled")) or sell_amount
+            average_price = safe_float(order.get("average")) or price
+            notional_usdt = filled_amount * average_price
+            converted_count += 1
+
+            self.push_auto_trade_event(
+                symbol,
+                "AUTO_CONVERT",
+                "SELL (AUTO->USDT)",
+                f"Auto-converted {asset} to USDT ({notional_usdt:.2f} USDT)",
+                price=average_price,
+                amount=filled_amount,
+                mode="live",
+            )
+            self.alerts.emit_alert(
+                symbol=symbol,
+                alert_type="auto_trade_auto_convert",
+                title=f"{symbol} auto convert to USDT",
+                message=f"Converted {filled_amount:.8f} {asset} to USDT",
+                severity="medium",
+                meta={
+                    "event": "AUTO_CONVERT",
+                    "position_side": "LONG",
+                    "order_side": "SELL",
+                    "price": average_price,
+                    "amount": filled_amount,
+                    "reason": "AUTO_CONVERT_TO_USDT",
+                    "mode": "LIVE",
+                },
+            )
+            self._record_journal(
+                symbol=symbol,
+                event_type="AUTO_CONVERT",
+                side="LONG",
+                reason="AUTO_CONVERT_TO_USDT",
+                pnl_usdt=None,
+                pnl_pct=None,
+                notional_usdt=notional_usdt,
+                price=average_price,
+                amount=filled_amount,
+                metadata={"asset": asset},
+            )
+
+        if converted_count > 0:
+            self._invalidate_wallet_cache()
+        return converted_count
+
     def _next_cooldown_seconds(self, row: dict[str, Any] | None = None) -> int:
         low = max(1, self.settings.cooldown_min_seconds)
         high = max(low, self.settings.cooldown_max_seconds)
@@ -932,6 +1064,16 @@ class TradingService:
                         },
                     )
 
+            converted_assets = self._auto_convert_wallet_assets_to_usdt(
+                wallet_payload,
+                rows_by_symbol,
+                now,
+            )
+            if converted_assets > 0:
+                status_reason = (
+                    f"{status_reason} • auto-convert {converted_assets} asset(s) to USDT"
+                )
+
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
             risk_halted = daily_pnl <= -self.settings.max_daily_loss_usdt
 
@@ -985,7 +1127,11 @@ class TradingService:
                     status_reason = f"{symbol}: position already open"
                     continue
 
-                if len(self.state.auto_trade_positions) >= self.settings.auto_trade_max_open_positions:
+                if (
+                    self.settings.auto_trade_max_open_positions > 0
+                    and len(self.state.auto_trade_positions)
+                    >= self.settings.auto_trade_max_open_positions
+                ):
                     status_reason = (
                         "max open positions reached "
                         f"({len(self.state.auto_trade_positions)}/"
@@ -1199,6 +1345,11 @@ class TradingService:
                 "ai_filter_enabled": self.settings.ai_filter_enabled,
                 "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),
+                "auto_convert_to_usdt": self.settings.auto_trade_auto_convert_to_usdt,
+                "auto_convert_min_usdt": round(self.settings.auto_trade_auto_convert_min_usdt, 4),
+                "auto_convert_interval_seconds": (
+                    self.settings.auto_trade_auto_convert_interval_seconds
+                ),
                 "cooldown_seconds": self.settings.cooldown_seconds,
                 "cooldown_min_seconds": self.settings.cooldown_min_seconds,
                 "cooldown_max_seconds": self.settings.cooldown_max_seconds,

@@ -35,6 +35,7 @@ class RuntimeState:
         self.auto_trade_guardrail_active = False
         self.auto_trade_guardrail_reason = ""
         self.auto_trade_last_reason = "Waiting for market conditions"
+        self.auto_trade_last_convert_at = 0.0
         self.auto_trade_journal: deque[dict[str, Any]] = deque(maxlen=1000)
         self.auto_trade_stats_by_symbol: dict[str, dict[str, Any]] = {}
 
