@@ -11,6 +11,7 @@ from services.config import Settings
 from services.exchange import ExchangeGateway
 from services.indicators import (
     add_indicators,
+    build_ai_filter_state,
     classify_strength,
     get_signal,
     safe_float,
@@ -39,6 +40,10 @@ class MarketService:
         self.alerts = alerts
         self.trading = trading
         self.logger = logger
+        self._indicator_backoff_until: dict[str, float] = {}
+        self._indicator_last_error: dict[str, str] = {}
+        self._row_error_logged_at: dict[str, float] = {}
+        self._global_rest_error_logged_at = 0.0
 
     @staticmethod
     def utc_day_key() -> str:
@@ -83,13 +88,52 @@ class MarketService:
                 "last_close": float(cached["last_close"]),
             }
 
-        candles = self.exchange.call(
-            "fetch_ohlcv",
-            symbol,
-            timeframe=timeframe,
-            limit=self.settings.signal_candle_limit,
-        )
+        backoff_until = self._indicator_backoff_until.get(cache_key, 0.0)
+        if backoff_until > now:
+            if cached:
+                return {
+                    "rsi": float(cached["rsi"]),
+                    "ema20": float(cached["ema20"]),
+                    "ema50": float(cached["ema50"]),
+                    "macd": float(cached["macd"]),
+                    "macd_signal": float(cached["macd_signal"]),
+                    "last_close": float(cached["last_close"]),
+                }
+            raise ValueError(
+                self._indicator_last_error.get(cache_key, "Indicator fetch in cooldown")
+            )
+
+        try:
+            candles = self.exchange.call(
+                "fetch_ohlcv",
+                symbol,
+                timeframe=timeframe,
+                limit=self.settings.signal_candle_limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc).strip() or "fetch_ohlcv failed"
+            self._indicator_last_error[cache_key] = message[:220]
+            self._indicator_backoff_until[cache_key] = now + 60.0
+
+            if cached:
+                self.logger.warning(
+                    "Using stale indicator cache for %s after fetch failure: %s",
+                    cache_key,
+                    message[:140],
+                )
+                return {
+                    "rsi": float(cached["rsi"]),
+                    "ema20": float(cached["ema20"]),
+                    "ema50": float(cached["ema50"]),
+                    "macd": float(cached["macd"]),
+                    "macd_signal": float(cached["macd_signal"]),
+                    "last_close": float(cached["last_close"]),
+                }
+            raise
+
         if not candles:
+            self._indicator_last_error[cache_key] = "No OHLCV candles returned"
+            self._indicator_backoff_until[cache_key] = now + 60.0
             raise ValueError("No OHLCV candles returned")
 
         df = pd.DataFrame(
@@ -119,6 +163,8 @@ class MarketService:
             "last_close": float(last["close"]),
         }
         self.state.indicator_cache[cache_key] = payload
+        self._indicator_backoff_until.pop(cache_key, None)
+        self._indicator_last_error.pop(cache_key, None)
 
         return {
             "rsi": payload["rsi"],
@@ -197,6 +243,16 @@ class MarketService:
                     ema50=indicators["ema50"],
                 )
                 strength = self.build_signal_strength(symbol)
+                ai_filter = build_ai_filter_state(
+                    price=price,
+                    rsi=indicators["rsi"],
+                    ema20=indicators["ema20"],
+                    ema50=indicators["ema50"],
+                    macd=indicators["macd"],
+                    macd_signal=indicators["macd_signal"],
+                    strength_score=float(strength["score"]),
+                    change_24h=change_24h,
+                )
 
                 rows.append(
                     {
@@ -218,10 +274,33 @@ class MarketService:
                         "strength_score": strength["score"],
                         "strength_confidence": strength["confidence"],
                         "strength_timeframes": strength["timeframes"],
+                        "ai_score": ai_filter["score"],
+                        "ai_confidence": ai_filter["confidence"],
+                        "ai_bias": ai_filter["bias"],
                     }
                 )
             except Exception as exc:  # noqa: BLE001
-                self.logger.exception("Failed to build row for %s", symbol)
+                now_ts = time.time()
+                error_text = str(exc)
+                is_global_rest_issue = (
+                    "GET https://" in error_text
+                    and (
+                        "api.gateio.ws" in error_text
+                        or "api.binance.com" in error_text
+                    )
+                )
+                if is_global_rest_issue:
+                    if now_ts - self._global_rest_error_logged_at >= 60.0:
+                        self._global_rest_error_logged_at = now_ts
+                        self.logger.warning(
+                            "Market REST unavailable, building degraded rows: %s",
+                            error_text[:180],
+                        )
+                else:
+                    logged_at = self._row_error_logged_at.get(symbol, 0.0)
+                    if now_ts - logged_at >= 60.0:
+                        self._row_error_logged_at[symbol] = now_ts
+                        self.logger.warning("Failed to build row for %s: %s", symbol, exc)
                 rows.append(
                     {
                         "symbol": symbol,
@@ -238,6 +317,9 @@ class MarketService:
                         "strength_score": 0.0,
                         "strength_confidence": 0,
                         "strength_timeframes": 0,
+                        "ai_score": 0.0,
+                        "ai_confidence": 0,
+                        "ai_bias": "HOLD",
                         "error": str(exc),
                     }
                 )

@@ -37,6 +37,10 @@ class ExchangeStreamService:
         self._gate_symbol_map = {
             symbol.replace("/", "_").upper(): symbol for symbol in settings.symbols
         }
+        self._depth_update_interval = "100ms" if len(settings.symbols) <= 20 else "1000ms"
+        self._binance_depth_stream = (
+            "depth20@100ms" if len(settings.symbols) <= 20 else "depth20"
+        )
         self._ssl_context = self._build_ssl_context()
 
     def _build_ssl_context(self) -> ssl.SSLContext:
@@ -128,7 +132,7 @@ class ExchangeStreamService:
             symbol_key = raw_symbol.lower()
             streams.append(f"{symbol_key}@ticker")
             streams.append(f"{symbol_key}@trade")
-            streams.append(f"{symbol_key}@depth20@100ms")
+            streams.append(f"{symbol_key}@{self._binance_depth_stream}")
 
         url = f"wss://stream.binance.com:9443/stream?streams={'/'.join(streams)}"
 
@@ -218,6 +222,7 @@ class ExchangeStreamService:
     async def _subscribe_gateio(self, ws: Any) -> None:
         now = int(time.time())
         depth = max(20, self.settings.orderbook_depth)
+        interval = self._depth_update_interval
 
         for pair in self._gate_symbol_map:
             await ws.send(
@@ -246,7 +251,7 @@ class ExchangeStreamService:
                         "time": now,
                         "channel": "spot.order_book_update",
                         "event": "subscribe",
-                        "payload": [pair, "100ms", str(depth)],
+                        "payload": [pair, interval, str(depth)],
                     }
                 )
             )
@@ -256,7 +261,7 @@ class ExchangeStreamService:
                         "time": now,
                         "channel": "spot.order_book",
                         "event": "subscribe",
-                        "payload": [pair, str(depth), "100ms"],
+                        "payload": [pair, str(depth), interval],
                     }
                 )
             )

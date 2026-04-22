@@ -47,6 +47,26 @@ class WebSocketManager:
         self._clients_lock = asyncio.Lock()
         self._broadcast_task: asyncio.Task[None] | None = None
 
+    async def _build_snapshot_for_view(
+        self,
+        symbol: str,
+        timeframe: str,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            snapshot = await asyncio.to_thread(
+                self.snapshot_builder,
+                symbol,
+                timeframe,
+            )
+            return snapshot, None
+        except Exception:  # noqa: BLE001
+            self.logger.exception(
+                "Snapshot generation failed for symbol=%s timeframe=%s",
+                symbol,
+                timeframe,
+            )
+            return None, "Live market stream is temporarily unavailable. Retrying..."
+
     async def start(self) -> None:
         if self._broadcast_task and not self._broadcast_task.done():
             return
@@ -211,9 +231,28 @@ class WebSocketManager:
             if not sessions:
                 continue
 
+            sessions_by_view: dict[tuple[str, str], list[ClientSession]] = {}
             for session in sessions:
                 if session.disconnected.is_set():
                     continue
-                await self._push_snapshot(session)
+                key = (session.symbol, session.timeframe)
+                sessions_by_view.setdefault(key, []).append(session)
+
+            for (symbol, timeframe), grouped_sessions in sessions_by_view.items():
+                snapshot, error_message = await self._build_snapshot_for_view(symbol, timeframe)
+                if snapshot is None:
+                    payload = {"type": "error", "message": error_message or "Snapshot failed"}
+                    for session in grouped_sessions:
+                        sent = await self._safe_send_json(session, payload)
+                        if not sent:
+                            await self._remove_session(session)
+                    continue
+
+                selected_symbol = str(snapshot.get("selected_symbol") or symbol)
+                for session in grouped_sessions:
+                    session.symbol = selected_symbol
+                    sent = await self._safe_send_json(session, snapshot)
+                    if not sent:
+                        await self._remove_session(session)
 
             last_push_at = time.monotonic()

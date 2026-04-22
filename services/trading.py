@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from contextlib import suppress
 from typing import Any
@@ -122,37 +123,217 @@ class TradingService:
             self.logger.exception("Auto trade order failed for %s side=%s", symbol, side)
             return {"ok": False, "error": str(exc)}
 
-    def should_enter_auto_trade(self, row: dict[str, Any]) -> bool:
-        signal = str(row.get("signal") or "HOLD").upper()
-        strength = str(row.get("strength") or "HOLD").upper()
-        confidence = int(safe_float(row.get("strength_confidence")) or 0)
+    @staticmethod
+    def _normalize_side(value: Any) -> str:
+        side = str(value or "LONG").strip().upper()
+        return side if side in {"LONG", "SHORT"} else "LONG"
 
+    def _strategy_allows(self, side: str) -> bool:
+        mode = self.settings.auto_trade_strategy_mode
+        if mode == "long_only":
+            return side == "LONG"
+        if mode == "short_only":
+            return side == "SHORT"
+        return side in {"LONG", "SHORT"}
+
+    def _rule_allows_side(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+        price = safe_float(row.get("price"))
+        ema50 = safe_float(row.get("ema50"))
+        rsi = safe_float(row.get("rsi"))
+
+        if price is None or ema50 is None or rsi is None:
+            return False, "waiting price/EMA50/RSI"
+
+        if side == "LONG":
+            if price <= ema50:
+                return False, "LONG rule: price must be > MA50"
+            if rsi < self.settings.long_rsi_min or rsi > self.settings.long_rsi_max:
+                return (
+                    False,
+                    (
+                        f"LONG rule: RSI {rsi:.2f} outside "
+                        f"{self.settings.long_rsi_min:.0f}-{self.settings.long_rsi_max:.0f}"
+                    ),
+                )
+            return True, ""
+
+        if price >= ema50:
+            return False, "SHORT rule: price must be < MA50"
+        if rsi < self.settings.short_rsi_min or rsi > self.settings.short_rsi_max:
+            return (
+                False,
+                (
+                    f"SHORT rule: RSI {rsi:.2f} outside "
+                    f"{self.settings.short_rsi_min:.0f}-{self.settings.short_rsi_max:.0f}"
+                ),
+            )
+        return True, ""
+
+    def _ai_filter_allows(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+        if not self.settings.ai_filter_enabled:
+            return True, ""
+
+        ai_bias = str(row.get("ai_bias") or "HOLD").upper()
+        ai_confidence = int(safe_float(row.get("ai_confidence")) or 0)
+        ai_score = float(safe_float(row.get("ai_score")) or 0.0)
+
+        if ai_confidence < self.settings.ai_filter_min_confidence:
+            return (
+                False,
+                (
+                    f"AI confidence {ai_confidence}% < "
+                    f"{self.settings.ai_filter_min_confidence}%"
+                ),
+            )
+
+        if abs(ai_score) < self.settings.ai_filter_min_score_abs:
+            return (
+                False,
+                (
+                    f"AI score abs {abs(ai_score):.2f} < "
+                    f"{self.settings.ai_filter_min_score_abs:.2f}"
+                ),
+            )
+
+        if side == "LONG" and ai_bias != "BUY":
+            return False, f"AI bias is {ai_bias}, not BUY"
+        if side == "SHORT" and ai_bias != "SELL":
+            return False, f"AI bias is {ai_bias}, not SELL"
+
+        return True, ""
+
+    def decide_entry_side(self, row: dict[str, Any]) -> tuple[str | None, str]:
+        reasons: list[str] = []
+        candidates: list[str] = []
+
+        if self._strategy_allows("LONG"):
+            ok, reason = self._rule_allows_side(row, "LONG")
+            if ok:
+                candidates.append("LONG")
+            elif reason:
+                reasons.append(reason)
+
+        if self.settings.auto_trade_enable_short and self._strategy_allows("SHORT"):
+            ok, reason = self._rule_allows_side(row, "SHORT")
+            if ok:
+                candidates.append("SHORT")
+            elif reason:
+                reasons.append(reason)
+
+        if not candidates:
+            return None, (reasons[0] if reasons else "waiting LONG/SHORT entry rules")
+
+        if len(candidates) == 1:
+            return candidates[0], ""
+
+        ai_score = safe_float(row.get("ai_score")) or 0.0
+        if ai_score < 0:
+            return "SHORT", ""
+        return "LONG", ""
+
+    def _side_stop_take_trail(self, side: str) -> tuple[float, float, float]:
+        if side == "SHORT":
+            return (
+                self.settings.short_stop_loss_pct,
+                self.settings.short_take_profit_pct,
+                self.settings.short_trailing_pct,
+            )
         return (
-            signal == "BUY"
-            and strength in {"BUY", "STRONG BUY"}
-            and confidence >= self.settings.auto_trade_min_confidence
+            self.settings.long_stop_loss_pct,
+            self.settings.long_take_profit_pct,
+            self.settings.long_trailing_pct,
         )
 
     def get_position_exit_reason(
         self,
         row: dict[str, Any],
-        entry_price: float,
+        position: dict[str, Any],
     ) -> tuple[str | None, float]:
+        entry_price = safe_float(position.get("entry_price")) or 0.0
         current_price = safe_float(row.get("price"))
         if current_price is None or entry_price <= 0:
             return None, 0.0
 
-        pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        position_side = self._normalize_side(position.get("side"))
+        stop_loss_pct, take_profit_pct, trailing_pct = self._side_stop_take_trail(position_side)
+
+        if position_side == "SHORT":
+            pnl_pct = ((entry_price - current_price) / entry_price) * 100
+        else:
+            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+
+        if pnl_pct <= -stop_loss_pct:
+            return "STOP LOSS", pnl_pct
+        if pnl_pct >= take_profit_pct:
+            return "TAKE PROFIT", pnl_pct
+
+        if trailing_pct > 0:
+            if position_side == "SHORT":
+                lowest_price = safe_float(position.get("lowest_price")) or entry_price
+                if current_price < lowest_price:
+                    lowest_price = current_price
+                    position["lowest_price"] = lowest_price
+
+                if lowest_price < entry_price:
+                    trailing_stop = lowest_price * (1 + trailing_pct / 100)
+                    if current_price >= trailing_stop:
+                        return "TRAILING STOP", pnl_pct
+            else:
+                highest_price = safe_float(position.get("highest_price")) or entry_price
+                if current_price > highest_price:
+                    highest_price = current_price
+                    position["highest_price"] = highest_price
+
+                if highest_price > entry_price:
+                    trailing_stop = highest_price * (1 - trailing_pct / 100)
+                    if current_price <= trailing_stop:
+                        return "TRAILING STOP", pnl_pct
+
         signal = str(row.get("signal") or "HOLD").upper()
         strength = str(row.get("strength") or "HOLD").upper()
+        if position_side == "SHORT":
+            if signal == "BUY" or strength in {"BUY", "STRONG BUY"}:
+                return "SIGNAL EXIT", pnl_pct
+        else:
+            if signal == "SELL" or strength in {"SELL", "STRONG SELL"}:
+                return "SIGNAL EXIT", pnl_pct
 
-        if pnl_pct <= -self.settings.stop_loss_pct:
-            return "STOP LOSS", pnl_pct
-        if pnl_pct >= self.settings.take_profit_pct:
-            return "TAKE PROFIT", pnl_pct
-        if signal == "SELL" or strength in {"SELL", "STRONG SELL"}:
-            return "SIGNAL EXIT", pnl_pct
         return None, pnl_pct
+
+    @staticmethod
+    def _entry_order_side(position_side: str) -> str:
+        return "sell" if position_side == "SHORT" else "buy"
+
+    @staticmethod
+    def _exit_order_side(position_side: str) -> str:
+        return "buy" if position_side == "SHORT" else "sell"
+
+    @staticmethod
+    def _pnl_usdt(position_side: str, entry_price: float, current_price: float, amount: float) -> float:
+        if position_side == "SHORT":
+            return (entry_price - current_price) * amount
+        return (current_price - entry_price) * amount
+
+    def _next_cooldown_seconds(self) -> int:
+        low = max(1, self.settings.cooldown_min_seconds)
+        high = max(low, self.settings.cooldown_max_seconds)
+        if low == high:
+            return low
+        return random.randint(low, high)
+
+    def _base_notional_usdt(self, available_usdt: float | None) -> float:
+        notional_usdt = self.settings.trade_size_usdt
+
+        if (
+            self.settings.trade_size_percent > 0
+            and available_usdt is not None
+            and available_usdt > 0
+        ):
+            notional_usdt = available_usdt * (self.settings.trade_size_percent / 100)
+
+        notional_usdt = max(notional_usdt, self.settings.trade_size_usdt_min)
+        notional_usdt = min(notional_usdt, self.settings.trade_size_usdt_max)
+        return notional_usdt
 
     def get_symbol_min_notional_usdt(self, symbol: str) -> float:
         try:
@@ -196,7 +377,7 @@ class TradingService:
             self.state.auto_trade_last_eval_at = now
 
             available_usdt = safe_float((wallet_payload or {}).get("usdt_free"))
-            status_reason = "Waiting for valid BUY signal"
+            status_reason = "Waiting for valid trade setup"
 
             day_key = self.utc_day_key()
             if day_key not in self.state.auto_trade_daily_pnl:
@@ -213,25 +394,29 @@ class TradingService:
                 if not row:
                     continue
 
-                entry_price = safe_float(position.get("entry_price")) or 0.0
                 amount = safe_float(position.get("amount")) or 0.0
                 current_price = safe_float(row.get("price"))
+                position_side = self._normalize_side(position.get("side"))
+
                 if amount <= 0 or current_price is None:
                     continue
 
-                reason, _ = self.get_position_exit_reason(row, entry_price)
+                reason, _ = self.get_position_exit_reason(row, position)
                 if not reason:
-                    status_reason = f"{symbol}: position open, monitoring exit conditions"
+                    status_reason = (
+                        f"{symbol}: {position_side} open, monitoring exit conditions"
+                    )
                     continue
 
-                order_result = self.execute_auto_trade_order(symbol, "sell", amount, current_price)
+                exit_side = self._exit_order_side(position_side)
+                order_result = self.execute_auto_trade_order(symbol, exit_side, amount, current_price)
                 if not order_result.get("ok"):
-                    error_message = str(order_result.get("error") or "Unknown sell error")
-                    status_reason = f"{symbol}: SELL failed ({error_message[:80]})"
+                    error_message = str(order_result.get("error") or "Unknown exit error")
+                    status_reason = f"{symbol}: EXIT failed ({error_message[:80]})"
                     self.push_auto_trade_event(
                         symbol,
                         "EXIT_FAILED",
-                        "SELL",
+                        f"{exit_side.upper()} ({position_side} EXIT)",
                         error_message,
                         price=current_price,
                         amount=amount,
@@ -240,23 +425,25 @@ class TradingService:
                     self.alerts.emit_alert(
                         symbol=symbol,
                         alert_type="auto_trade_error",
-                        title=f"{symbol} auto-trade SELL failed",
+                        title=f"{symbol} auto-trade EXIT failed",
                         message=error_message[:140],
                         severity="high",
                     )
                     continue
 
+                entry_price = safe_float(position.get("entry_price")) or current_price
                 filled_amount = safe_float(order_result.get("filled")) or amount
-                pnl_usdt = (current_price - entry_price) * filled_amount
+                pnl_usdt = self._pnl_usdt(position_side, entry_price, current_price, filled_amount)
                 self.state.auto_trade_daily_pnl[day_key] += pnl_usdt
                 self.state.auto_trade_last_action_ts[symbol] = now
+                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds()
                 self.state.auto_trade_positions.pop(symbol, None)
-                status_reason = f"{symbol}: position closed ({reason})"
+                status_reason = f"{symbol}: {position_side} closed ({reason})"
 
                 self.push_auto_trade_event(
                     symbol,
                     "EXIT",
-                    "SELL",
+                    f"{exit_side.upper()} ({position_side} EXIT)",
                     f"{reason} • PnL {pnl_usdt:.2f} USDT",
                     price=current_price,
                     amount=filled_amount,
@@ -265,8 +452,8 @@ class TradingService:
                 )
                 self.alerts.emit_alert(
                     symbol=symbol,
-                    alert_type="auto_trade_sell",
-                    title=f"{symbol} auto SELL executed",
+                    alert_type="auto_trade_exit",
+                    title=f"{symbol} auto {position_side} EXIT executed",
                     message=f"{reason} • PnL {pnl_usdt:.2f} USDT",
                     severity=("medium" if pnl_usdt >= 0 else "high"),
                 )
@@ -299,16 +486,26 @@ class TradingService:
                 symbol = str(row.get("symbol") or "")
                 if not symbol or symbol not in self.settings.auto_trade_symbols_set:
                     continue
+
                 if row.get("error"):
                     status_reason = f"{symbol}: market data error"
                     continue
+
                 if symbol in self.state.auto_trade_positions:
                     status_reason = f"{symbol}: position already open"
                     continue
 
-                last_action_ts = self.state.auto_trade_last_action_ts.get(symbol, 0.0)
-                if now - last_action_ts < self.settings.cooldown_seconds:
-                    remaining = int(self.settings.cooldown_seconds - (now - last_action_ts))
+                if len(self.state.auto_trade_positions) >= self.settings.auto_trade_max_open_positions:
+                    status_reason = (
+                        "max open positions reached "
+                        f"({len(self.state.auto_trade_positions)}/"
+                        f"{self.settings.auto_trade_max_open_positions})"
+                    )
+                    break
+
+                cooldown_until = self.state.auto_trade_cooldown_until.get(symbol, 0.0)
+                if now < cooldown_until:
+                    remaining = int(cooldown_until - now)
                     status_reason = f"{symbol}: cooldown {max(0, remaining)}s"
                     continue
 
@@ -316,21 +513,25 @@ class TradingService:
                 if current_price is None or current_price <= 0:
                     status_reason = f"{symbol}: waiting valid price"
                     continue
-                if not self.should_enter_auto_trade(row):
+
+                entry_side, reason_text = self.decide_entry_side(row)
+                if not entry_side:
+                    status_reason = f"{symbol}: {reason_text}"
+                    continue
+
+                ai_ok, ai_reason = self._ai_filter_allows(row, entry_side)
+                if not ai_ok:
+                    status_reason = f"{symbol}: AI filter blocked ({ai_reason})"
+                    continue
+
+                if entry_side == "SHORT" and not self.settings.paper_trading:
                     status_reason = (
-                        f"{symbol}: waiting BUY signal/strength/confidence >= "
-                        f"{self.settings.auto_trade_min_confidence}%"
+                        f"{symbol}: short entry blocked in LIVE spot mode "
+                        "(use PAPER or derivatives integration)"
                     )
                     continue
 
-                notional_usdt = self.settings.trade_size_usdt
-                if (
-                    self.settings.trade_size_percent > 0
-                    and available_usdt is not None
-                    and available_usdt > 0
-                ):
-                    sized_by_percent = available_usdt * (self.settings.trade_size_percent / 100)
-                    notional_usdt = min(sized_by_percent, available_usdt)
+                notional_usdt = self._base_notional_usdt(available_usdt)
 
                 min_notional_usdt = self.get_symbol_min_notional_usdt(symbol)
                 required_min_notional = min_notional_usdt * (
@@ -348,14 +549,20 @@ class TradingService:
                     continue
 
                 amount = notional_usdt / current_price
-                order_result = self.execute_auto_trade_order(symbol, "buy", amount, current_price)
+                exchange_side = self._entry_order_side(entry_side)
+                order_result = self.execute_auto_trade_order(
+                    symbol,
+                    exchange_side,
+                    amount,
+                    current_price,
+                )
                 if not order_result.get("ok"):
-                    error_message = str(order_result.get("error") or "Unknown buy error")
-                    status_reason = f"{symbol}: BUY failed ({error_message[:80]})"
+                    error_message = str(order_result.get("error") or "Unknown entry error")
+                    status_reason = f"{symbol}: ENTRY failed ({error_message[:80]})"
                     self.push_auto_trade_event(
                         symbol,
                         "ENTRY_FAILED",
-                        "BUY",
+                        f"{exchange_side.upper()} ({entry_side})",
                         error_message,
                         price=current_price,
                         amount=amount,
@@ -364,7 +571,7 @@ class TradingService:
                     self.alerts.emit_alert(
                         symbol=symbol,
                         alert_type="auto_trade_error",
-                        title=f"{symbol} auto-trade BUY failed",
+                        title=f"{symbol} auto-trade ENTRY failed",
                         message=error_message[:140],
                         severity="high",
                     )
@@ -372,25 +579,30 @@ class TradingService:
 
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 entry_price = safe_float(order_result.get("average")) or current_price
+
                 self.state.auto_trade_positions[symbol] = {
+                    "side": entry_side,
                     "entry_price": entry_price,
                     "amount": filled_amount,
                     "notional_usdt": notional_usdt,
                     "opened_at": int(now),
                     "mode": str(order_result.get("mode") or "live"),
+                    "highest_price": entry_price,
+                    "lowest_price": entry_price,
                 }
                 self.state.auto_trade_last_action_ts[symbol] = now
+                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds()
                 if available_usdt is not None:
                     available_usdt = max(0.0, available_usdt - notional_usdt)
-                status_reason = f"{symbol}: BUY opened at {entry_price:.6f}"
+                status_reason = f"{symbol}: {entry_side} opened at {entry_price:.6f}"
 
                 self.push_auto_trade_event(
                     symbol,
                     "ENTRY",
-                    "BUY",
+                    f"{exchange_side.upper()} ({entry_side})",
                     (
-                        f"Auto BUY with strength {row.get('strength')} "
-                        f"({row.get('strength_confidence')}%)"
+                        f"Rule {entry_side} passed • RSI {row.get('rsi')} • "
+                        f"AI {row.get('ai_bias')} ({row.get('ai_confidence')}%)"
                     ),
                     price=entry_price,
                     amount=filled_amount,
@@ -398,8 +610,8 @@ class TradingService:
                 )
                 self.alerts.emit_alert(
                     symbol=symbol,
-                    alert_type="auto_trade_buy",
-                    title=f"{symbol} auto BUY executed",
+                    alert_type="auto_trade_entry",
+                    title=f"{symbol} auto {entry_side} ENTRY executed",
                     message=f"Entry {entry_price:.6f} • size {filled_amount:.6f}",
                     severity="medium",
                 )
@@ -418,11 +630,30 @@ class TradingService:
                 "exchange": self.settings.exchange_name,
                 "symbols": self.settings.auto_trade_symbols,
                 "trade_size_usdt": self.settings.trade_size_usdt,
+                "trade_size_usdt_min": round(self.settings.trade_size_usdt_min, 4),
+                "trade_size_usdt_max": round(self.settings.trade_size_usdt_max, 4),
                 "trade_size_percent": round(self.settings.trade_size_percent, 4),
                 "min_notional_usdt": round(self.settings.auto_trade_min_notional_usdt, 4),
                 "min_buffer_pct": round(self.settings.auto_trade_min_buffer_pct, 4),
-                "min_confidence": self.settings.auto_trade_min_confidence,
+                "strategy_mode": self.settings.auto_trade_strategy_mode,
+                "short_enabled": self.settings.auto_trade_enable_short,
+                "max_open_positions": self.settings.auto_trade_max_open_positions,
+                "long_rsi_min": round(self.settings.long_rsi_min, 2),
+                "long_rsi_max": round(self.settings.long_rsi_max, 2),
+                "short_rsi_min": round(self.settings.short_rsi_min, 2),
+                "short_rsi_max": round(self.settings.short_rsi_max, 2),
+                "long_stop_loss_pct": round(self.settings.long_stop_loss_pct, 2),
+                "long_take_profit_pct": round(self.settings.long_take_profit_pct, 2),
+                "long_trailing_pct": round(self.settings.long_trailing_pct, 2),
+                "short_stop_loss_pct": round(self.settings.short_stop_loss_pct, 2),
+                "short_take_profit_pct": round(self.settings.short_take_profit_pct, 2),
+                "short_trailing_pct": round(self.settings.short_trailing_pct, 2),
+                "ai_filter_enabled": self.settings.ai_filter_enabled,
+                "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
+                "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),
                 "cooldown_seconds": self.settings.cooldown_seconds,
+                "cooldown_min_seconds": self.settings.cooldown_min_seconds,
+                "cooldown_max_seconds": self.settings.cooldown_max_seconds,
                 "daily_pnl_usdt": round(daily_pnl, 4),
                 "daily_loss_limit_usdt": round(self.settings.max_daily_loss_usdt, 4),
                 "halted": (self.state.auto_trade_halt_day == day_key),

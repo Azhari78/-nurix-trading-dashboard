@@ -307,7 +307,10 @@ function updateStats(summary) {
   const strengthConfidenceText = Number.isNaN(strengthConfidence)
     ? ""
     : ` (${strengthConfidence}%)`;
-  statStrength.textContent = `${strengthValue}${strengthConfidenceText}`;
+  const aiBias = String(summary.ai_bias || "HOLD").toUpperCase();
+  const aiConfidence = Number(summary.ai_confidence);
+  const aiConfidenceText = Number.isNaN(aiConfidence) ? "" : ` (${aiConfidence}%)`;
+  statStrength.textContent = `${strengthValue}${strengthConfidenceText} • AI ${aiBias}${aiConfidenceText}`;
   statStrength.classList.remove("pos", "neg");
   if (strengthValue.includes("BUY")) statStrength.classList.add("pos");
   if (strengthValue.includes("SELL")) statStrength.classList.add("neg");
@@ -688,15 +691,28 @@ function renderAutoTrade(payload) {
   const paper = Boolean(data.paper_trading);
   const exchange = String(data.exchange || "-");
   const openPositions = Number(data.open_positions || 0);
+  const maxOpenPositions = Number(data.max_open_positions);
   const dailyPnl = Number(data.daily_pnl_usdt);
   const lossLimit = Number(data.daily_loss_limit_usdt);
   const tradeSizeUsdt = Number(data.trade_size_usdt);
+  const tradeSizeUsdtMin = Number(data.trade_size_usdt_min);
+  const tradeSizeUsdtMax = Number(data.trade_size_usdt_max);
   const tradeSizePercent = Number(data.trade_size_percent);
   const minNotionalUsdt = Number(data.min_notional_usdt);
+  const strategyModeRaw = String(data.strategy_mode || "long_only");
+  const shortEnabled = Boolean(data.short_enabled);
+  const aiFilterEnabled = Boolean(data.ai_filter_enabled);
+  const aiFilterMinConfidence = Number(data.ai_filter_min_confidence);
+  const aiFilterMinScoreAbs = Number(data.ai_filter_min_score_abs);
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
   const lastReason = String(data.last_reason || "-");
+  const strategyLabel = strategyModeRaw === "both"
+    ? "LONG+SHORT"
+    : strategyModeRaw === "short_only"
+      ? "SHORT ONLY"
+      : "LONG ONLY";
 
   if (autoTradeStatusNode) {
     if (!enabled) {
@@ -715,7 +731,8 @@ function renderAutoTrade(payload) {
 
   if (autoTradeModeNode) {
     const modeText = paper ? "PAPER" : "LIVE";
-    autoTradeModeNode.textContent = `${modeText} • ${exchange.toUpperCase()}`;
+    autoTradeModeNode.textContent =
+      `${modeText} • ${exchange.toUpperCase()} • ${strategyLabel}`;
   }
 
   if (autoTradePnlNode) {
@@ -728,11 +745,22 @@ function renderAutoTrade(payload) {
 
   if (autoTradeRiskNode) {
     const limitText = Number.isNaN(lossLimit) ? "-" : `-${lossLimit.toFixed(2)} USDT`;
+    const sizeRangeText =
+      !Number.isNaN(tradeSizeUsdtMin) &&
+      !Number.isNaN(tradeSizeUsdtMax) &&
+      tradeSizeUsdtMax >= tradeSizeUsdtMin
+        ? `${fmtNumber(tradeSizeUsdtMin, 2)}-${fmtNumber(tradeSizeUsdtMax, 2)} USDT`
+        : (!Number.isNaN(tradeSizeUsdt) ? `${fmtNumber(tradeSizeUsdt, 2)} USDT` : "-");
     const sizeText = !Number.isNaN(tradeSizePercent) && tradeSizePercent > 0
       ? `${fmtNumber(tradeSizePercent, 2)}%`
-      : (!Number.isNaN(tradeSizeUsdt) ? `${fmtNumber(tradeSizeUsdt, 2)} USDT` : "-");
+      : sizeRangeText;
     const minText = Number.isNaN(minNotionalUsdt) ? "-" : `${fmtNumber(minNotionalUsdt, 2)} USDT`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • Open ${openPositions}`;
+    const aiText = aiFilterEnabled
+      ? `AI ON (>=${Number.isNaN(aiFilterMinConfidence) ? "-" : aiFilterMinConfidence}% / abs ${Number.isNaN(aiFilterMinScoreAbs) ? "-" : fmtNumber(aiFilterMinScoreAbs, 2)})`
+      : "AI OFF";
+    const shortText = shortEnabled ? "SHORT ON" : "SHORT OFF";
+    const openText = Number.isNaN(maxOpenPositions) ? `${openPositions}` : `${openPositions}/${maxOpenPositions}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
@@ -741,8 +769,9 @@ function renderAutoTrade(payload) {
 
   if (autoTradeSelectedNode) {
     if (selected && selected.entry_price && selected.amount) {
+      const side = String(selected.side || "LONG").toUpperCase();
       autoTradeSelectedNode.textContent =
-        `Entry ${fmtPrice(selected.entry_price)} • Qty ${fmtQty(selected.amount)}`;
+        `${side} • Entry ${fmtPrice(selected.entry_price)} • Qty ${fmtQty(selected.amount)}`;
     } else {
       autoTradeSelectedNode.textContent = "No open position";
     }

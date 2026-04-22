@@ -94,3 +94,68 @@ def classify_strength(average_score: float) -> str:
     if average_score <= -1.0:
         return "SELL"
     return "HOLD"
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def build_ai_filter_state(
+    *,
+    price: float,
+    rsi: float,
+    ema20: float,
+    ema50: float,
+    macd: float,
+    macd_signal: float,
+    strength_score: float,
+    change_24h: float | None,
+) -> dict[str, float | int | str]:
+    score = 0.0
+
+    # Trend regime
+    if price >= ema20 >= ema50:
+        score += 1.8
+    elif price <= ema20 <= ema50:
+        score -= 1.8
+    elif price >= ema20:
+        score += 0.7
+    else:
+        score -= 0.7
+
+    # Momentum (MACD spread)
+    macd_spread = macd - macd_signal
+    score += clamp(macd_spread * 8.0, -1.4, 1.4)
+
+    # RSI context
+    if rsi >= 72:
+        score -= 1.0
+    elif rsi <= 28:
+        score += 1.0
+    elif rsi >= 55:
+        score += 0.45
+    elif rsi <= 45:
+        score -= 0.45
+
+    # Multi-timeframe strength from existing engine
+    score += clamp(strength_score / 5.0, -1.0, 1.0)
+
+    # Short-term change moderation
+    if change_24h is not None:
+        score += clamp(change_24h / 6.0, -0.6, 0.6)
+
+    score = clamp(score, -5.0, 5.0)
+    confidence = min(100, int(round(abs(score) / 5.0 * 100)))
+
+    if score >= 1.2:
+        bias = "BUY"
+    elif score <= -1.2:
+        bias = "SELL"
+    else:
+        bias = "HOLD"
+
+    return {
+        "score": round(score, 2),
+        "confidence": confidence,
+        "bias": bias,
+    }

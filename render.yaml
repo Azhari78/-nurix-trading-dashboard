@@ -3,7 +3,7 @@ services:
     name: nurix-trading-dashboard
     env: python
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -15,7 +15,7 @@ services:
       - key: EXCHANGE_NAME
         value: gateio
       - key: SYMBOLS
-        value: BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,TRX/USDT,AVAX/USDT,LINK/USDT
+        value: BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,TRX/USDT,AVAX/USDT,LINK/USDT,DOT/USDT,POL/USDT,LTC/USDT,BCH/USDT,XLM/USDT,ATOM/USDT,XMR/USDT,ETC/USDT,UNI/USDT,FIL/USDT,HBAR/USDT,NEAR/USDT,ICP/USDT,VET/USDT,CRO/USDT,ALGO/USDT,SUI/USDT,INJ/USDT,APT/USDT,OP/USDT,ARB/USDT,RNDR/USDT,IMX/USDT,STX/USDT,MKR/USDT,AAVE/USDT,THETA/USDT,EOS/USDT,EGLD/USDT,MANA/USDT,SAND/USDT,FTM/USDT,TIA/USDT,PEPE/USDT,SHIB/USDT,BONK/USDT,GRT/USDT,LDO/USDT,FLOW/USDT,SEI/USDT
       - key: DEFAULT_TIMEFRAME
         value: 1m
 
@@ -31,8 +31,18 @@ services:
         value: "true"
       - key: AUTO_TRADE_SYMBOLS
         value: BTC/USDT
+      - key: AUTO_TRADE_STRATEGY_MODE
+        value: both
+      - key: AUTO_TRADE_ENABLE_SHORT
+        value: "true"
+      - key: AUTO_TRADE_MAX_OPEN_POSITIONS
+        value: "2"
       - key: TRADE_SIZE_USDT
-        value: "3.5"
+        value: "9"
+      - key: TRADE_SIZE_USDT_MIN
+        value: "8"
+      - key: TRADE_SIZE_USDT_MAX
+        value: "10"
       - key: TRADE_SIZE_PERCENT
         value: "0"
       - key: AUTO_TRADE_MIN_NOTIONAL_USDT
@@ -40,15 +50,45 @@ services:
       - key: AUTO_TRADE_MIN_BUFFER_PCT
         value: "1.5"
       - key: STOP_LOSS_PCT
-        value: "4.0"
+        value: "5.0"
       - key: TAKE_PROFIT_PCT
-        value: "4.5"
+        value: "10.0"
+      - key: LONG_RSI_MIN
+        value: "45"
+      - key: LONG_RSI_MAX
+        value: "60"
+      - key: LONG_STOP_LOSS_PCT
+        value: "5.0"
+      - key: LONG_TAKE_PROFIT_PCT
+        value: "10.0"
+      - key: LONG_TRAILING_PCT
+        value: "5.0"
+      - key: SHORT_RSI_MIN
+        value: "60"
+      - key: SHORT_RSI_MAX
+        value: "75"
+      - key: SHORT_STOP_LOSS_PCT
+        value: "4.0"
+      - key: SHORT_TAKE_PROFIT_PCT
+        value: "7.0"
+      - key: SHORT_TRAILING_PCT
+        value: "4.0"
       - key: COOLDOWN_SECONDS
-        value: "300"
+        value: "600"
+      - key: COOLDOWN_MIN_SECONDS
+        value: "600"
+      - key: COOLDOWN_MAX_SECONDS
+        value: "900"
       - key: MAX_DAILY_LOSS_USDT
         value: "20"
       - key: AUTO_TRADE_MIN_CONFIDENCE
         value: "55"
+      - key: AI_FILTER_ENABLED
+        value: "true"
+      - key: AI_FILTER_MIN_CONFIDENCE
+        value: "55"
+      - key: AI_FILTER_MIN_SCORE_ABS
+        value: "1.0"
       - key: USE_SANDBOX
         value: "false"
 

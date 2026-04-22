@@ -24,6 +24,7 @@ class RuntimeState:
         self.auto_trade_counter = 0
         self.auto_trade_positions: dict[str, dict[str, Any]] = {}
         self.auto_trade_last_action_ts: dict[str, float] = {}
+        self.auto_trade_cooldown_until: dict[str, float] = {}
         self.auto_trade_daily_pnl: dict[str, float] = {}
         self.auto_trade_last_eval_at = 0.0
         self.auto_trade_halt_day: str | None = None
