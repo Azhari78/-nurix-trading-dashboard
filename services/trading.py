@@ -31,6 +31,18 @@ class TradingService:
         self._runtime_auto_trade_symbols_set = set(settings.auto_trade_symbols_set)
         self._symbol_validation_done = False
         self._session_windows = self._parse_session_windows(settings.auto_trade_session_utc)
+        self._copy_followers = [
+            {"name": follower_name, "multiplier": float(multiplier)}
+            for follower_name, multiplier in settings.copy_trade_followers
+            if follower_name and float(multiplier) > 0
+        ]
+        for follower in self._copy_followers:
+            name = str(follower["name"])
+            self.state.copy_trade_positions.setdefault(name, {})
+            self.state.copy_trade_stats.setdefault(
+                name,
+                {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
+            )
 
     @staticmethod
     def utc_day_key() -> str:
@@ -177,6 +189,235 @@ class TradingService:
         else:
             stats["losses"] += 1
             self.state.auto_trade_consecutive_losses += 1
+
+    def _copy_trade_is_enabled(self) -> bool:
+        return bool(self.settings.copy_trade_enabled and self._copy_followers)
+
+    def _copy_trade_event(
+        self,
+        *,
+        follower: str,
+        symbol: str,
+        event_type: str,
+        side: str,
+        amount: float,
+        price: float,
+        pnl_usdt: float | None = None,
+        reason: str = "",
+    ) -> None:
+        self.state.copy_trade_counter += 1
+        self.state.copy_trade_events.append(
+            {
+                "id": self.state.copy_trade_counter,
+                "timestamp": int(time.time()),
+                "follower": follower,
+                "symbol": symbol,
+                "event_type": event_type,
+                "side": side,
+                "amount": round(amount, 8),
+                "price": round(price, 6),
+                "pnl_usdt": round(pnl_usdt, 4) if pnl_usdt is not None else None,
+                "reason": reason,
+            }
+        )
+
+    def _copy_trade_price_with_slippage(self, price: float, order_side: str) -> float:
+        slip = max(0.0, self.settings.copy_trade_slippage_bps) / 10000.0
+        side = str(order_side or "").lower()
+        if side == "buy":
+            return price * (1 + slip)
+        if side == "sell":
+            return price * (1 - slip)
+        return price
+
+    def _copy_trade_on_entry(
+        self,
+        *,
+        symbol: str,
+        position_side: str,
+        order_side: str,
+        entry_price: float,
+        amount: float,
+        notional_usdt: float,
+    ) -> None:
+        if not self._copy_trade_is_enabled():
+            return
+
+        for follower in self._copy_followers:
+            follower_name = str(follower["name"])
+            multiplier = float(follower["multiplier"])
+            follower_amount = amount * multiplier
+            follower_price = self._copy_trade_price_with_slippage(entry_price, order_side)
+            follower_notional = notional_usdt * multiplier
+
+            follower_positions = self.state.copy_trade_positions.setdefault(follower_name, {})
+            follower_positions[symbol] = {
+                "side": position_side,
+                "entry_price": follower_price,
+                "amount": follower_amount,
+                "notional_usdt": follower_notional,
+                "opened_at": int(time.time()),
+            }
+            self._copy_trade_event(
+                follower=follower_name,
+                symbol=symbol,
+                event_type="COPY_ENTRY",
+                side=position_side,
+                amount=follower_amount,
+                price=follower_price,
+                reason="Mirrored master entry",
+            )
+
+    def _copy_trade_on_exit(
+        self,
+        *,
+        symbol: str,
+        position_side: str,
+        order_side: str,
+        exit_price: float,
+        master_amount: float,
+        reason: str,
+        partial: bool = False,
+    ) -> None:
+        if not self._copy_trade_is_enabled():
+            return
+
+        for follower in self._copy_followers:
+            follower_name = str(follower["name"])
+            multiplier = float(follower["multiplier"])
+            follower_positions = self.state.copy_trade_positions.get(follower_name, {})
+            follower_position = follower_positions.get(symbol)
+            if not follower_position:
+                continue
+
+            open_amount = safe_float(follower_position.get("amount")) or 0.0
+            close_amount = min(open_amount, master_amount * multiplier)
+            if close_amount <= 0:
+                continue
+
+            follower_entry = safe_float(follower_position.get("entry_price")) or exit_price
+            follower_exit = self._copy_trade_price_with_slippage(exit_price, order_side)
+            follower_pnl = self._pnl_usdt(position_side, follower_entry, follower_exit, close_amount)
+
+            remaining_amount = max(0.0, open_amount - close_amount)
+            if remaining_amount <= 0:
+                follower_positions.pop(symbol, None)
+            else:
+                follower_position["amount"] = remaining_amount
+
+            stats = self.state.copy_trade_stats.setdefault(
+                follower_name,
+                {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
+            )
+            stats["pnl_usdt"] += follower_pnl
+            if not partial or remaining_amount <= 0:
+                stats["trades"] += 1
+                if follower_pnl >= 0:
+                    stats["wins"] += 1
+                else:
+                    stats["losses"] += 1
+
+            self._copy_trade_event(
+                follower=follower_name,
+                symbol=symbol,
+                event_type=("COPY_PARTIAL_EXIT" if partial else "COPY_EXIT"),
+                side=position_side,
+                amount=close_amount,
+                price=follower_exit,
+                pnl_usdt=follower_pnl,
+                reason=reason,
+            )
+
+    def _derive_auto_adapt_profile(
+        self,
+        market_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        base_conf = self.settings.ai_filter_min_confidence
+        if not self.settings.auto_trade_auto_adapt_enabled:
+            profile = {
+                "name": "BALANCED",
+                "reason": "Auto-adapt disabled",
+                "risk_mult": 1.0,
+                "ai_min_confidence": base_conf,
+                "cooldown_mult": 1.0,
+            }
+            self.state.auto_trade_adaptive_profile = profile["name"]
+            self.state.auto_trade_adaptive_reason = profile["reason"]
+            self.state.auto_trade_adaptive_ai_min_confidence = profile["ai_min_confidence"]
+            self.state.auto_trade_adaptive_risk_multiplier = profile["risk_mult"]
+            self.state.auto_trade_adaptive_cooldown_multiplier = profile["cooldown_mult"]
+            return profile
+
+        scoped_rows = [
+            row
+            for row in market_rows
+            if str(row.get("symbol") or "") in self._runtime_auto_trade_symbols_set
+            and not row.get("error")
+        ]
+
+        atr_values = sorted(
+            [
+                value
+                for value in (
+                    safe_float(row.get("atr_pct"))
+                    for row in scoped_rows
+                )
+                if value is not None and value > 0
+            ]
+        )
+        ai_conf_values = [
+            value
+            for value in (
+                safe_float(row.get("ai_confidence"))
+                for row in scoped_rows
+            )
+            if value is not None
+        ]
+
+        median_atr = atr_values[len(atr_values) // 2] if atr_values else 0.0
+        avg_ai_conf = sum(ai_conf_values) / len(ai_conf_values) if ai_conf_values else 0.0
+        loss_streak = self.state.auto_trade_consecutive_losses
+
+        profile_name = "BALANCED"
+        risk_mult = 1.0
+        ai_min_conf = base_conf
+        cooldown_mult = 1.0
+
+        if (
+            median_atr >= self.settings.auto_trade_auto_adapt_high_atr_pct
+            or loss_streak >= max(2, self.settings.auto_trade_max_consecutive_losses - 1)
+        ):
+            profile_name = "DEFENSIVE"
+            risk_mult = self.settings.auto_trade_auto_adapt_risk_off_mult
+            ai_min_conf = min(100, base_conf + self.settings.auto_trade_auto_adapt_conf_step)
+            cooldown_mult = self.settings.auto_trade_auto_adapt_cooldown_off_mult
+        elif (
+            median_atr <= self.settings.auto_trade_auto_adapt_low_atr_pct
+            and avg_ai_conf >= max(40, base_conf)
+            and loss_streak == 0
+        ):
+            profile_name = "AGGRESSIVE"
+            risk_mult = self.settings.auto_trade_auto_adapt_risk_on_mult
+            ai_min_conf = max(0, base_conf - self.settings.auto_trade_auto_adapt_conf_step)
+            cooldown_mult = self.settings.auto_trade_auto_adapt_cooldown_on_mult
+
+        reason = (
+            f"{profile_name}: ATR~{median_atr:.2f}% • AI~{avg_ai_conf:.0f}% • "
+            f"loss streak {loss_streak}"
+        )
+        profile = {
+            "name": profile_name,
+            "reason": reason,
+            "risk_mult": risk_mult,
+            "ai_min_confidence": ai_min_conf,
+            "cooldown_mult": cooldown_mult,
+        }
+        self.state.auto_trade_adaptive_profile = profile_name
+        self.state.auto_trade_adaptive_reason = reason
+        self.state.auto_trade_adaptive_ai_min_confidence = ai_min_conf
+        self.state.auto_trade_adaptive_risk_multiplier = risk_mult
+        self.state.auto_trade_adaptive_cooldown_multiplier = cooldown_mult
+        return profile
 
     def _recent_realized_trades(self, now_ts: float, lookback_seconds: int = 7 * 86400) -> list[dict[str, Any]]:
         minimum_ts = int(now_ts) - lookback_seconds
@@ -474,20 +715,31 @@ class TradingService:
             )
         return True, ""
 
-    def _ai_filter_allows(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+    def _ai_filter_allows(
+        self,
+        row: dict[str, Any],
+        side: str,
+        *,
+        min_confidence_override: int | None = None,
+    ) -> tuple[bool, str]:
         if not self.settings.ai_filter_enabled:
             return True, ""
 
         ai_bias = str(row.get("ai_bias") or "HOLD").upper()
         ai_confidence = int(safe_float(row.get("ai_confidence")) or 0)
         ai_score = float(safe_float(row.get("ai_score")) or 0.0)
+        min_confidence = (
+            int(min_confidence_override)
+            if min_confidence_override is not None
+            else self.settings.ai_filter_min_confidence
+        )
 
-        if ai_confidence < self.settings.ai_filter_min_confidence:
+        if ai_confidence < min_confidence:
             return (
                 False,
                 (
                     f"AI confidence {ai_confidence}% < "
-                    f"{self.settings.ai_filter_min_confidence}%"
+                    f"{min_confidence}%"
                 ),
             )
 
@@ -640,6 +892,67 @@ class TradingService:
         with self.state.wallet_lock:
             self.state.wallet_cache["updated_at"] = 0.0
 
+    def _paper_wallet_enabled(self) -> bool:
+        return bool(self.settings.paper_trading and self.settings.paper_wallet_enabled)
+
+    def _ensure_paper_wallet_locked(self) -> None:
+        if self.state.paper_wallet_initialized:
+            return
+        self.state.paper_wallet_initialized = True
+        self.state.paper_wallet_free_usdt = float(self.settings.paper_wallet_start_usdt)
+        self.state.paper_wallet_used_usdt = 0.0
+        self.state.paper_wallet_realized_pnl_usdt = 0.0
+
+    def _paper_wallet_on_entry(self, notional_usdt: float) -> bool:
+        if not self._paper_wallet_enabled():
+            return True
+        reserve = max(0.0, float(notional_usdt))
+        with self.state.wallet_lock:
+            self._ensure_paper_wallet_locked()
+            free = max(0.0, float(self.state.paper_wallet_free_usdt))
+            if free + 1e-9 < reserve:
+                return False
+            self.state.paper_wallet_free_usdt = free - reserve
+            self.state.paper_wallet_used_usdt = (
+                max(0.0, float(self.state.paper_wallet_used_usdt)) + reserve
+            )
+            self.state.wallet_cache["updated_at"] = 0.0
+        return True
+
+    def _paper_wallet_on_close(
+        self,
+        *,
+        position: dict[str, Any],
+        closed_amount: float,
+        open_amount_before_close: float,
+        pnl_usdt: float,
+    ) -> None:
+        if not self._paper_wallet_enabled():
+            return
+        if open_amount_before_close <= 0 or closed_amount <= 0:
+            return
+
+        close_ratio = self._clamp(closed_amount / open_amount_before_close, 0.0, 1.0)
+        current_notional = max(0.0, safe_float(position.get("notional_usdt")) or 0.0)
+        reserved_release = current_notional * close_ratio
+        position["notional_usdt"] = max(0.0, current_notional - reserved_release)
+
+        with self.state.wallet_lock:
+            self._ensure_paper_wallet_locked()
+            self.state.paper_wallet_used_usdt = max(
+                0.0,
+                float(self.state.paper_wallet_used_usdt) - reserved_release,
+            )
+            self.state.paper_wallet_free_usdt = (
+                float(self.state.paper_wallet_free_usdt)
+                + reserved_release
+                + float(pnl_usdt)
+            )
+            self.state.paper_wallet_realized_pnl_usdt = (
+                float(self.state.paper_wallet_realized_pnl_usdt) + float(pnl_usdt)
+            )
+            self.state.wallet_cache["updated_at"] = 0.0
+
     def _auto_convert_wallet_assets_to_usdt(
         self,
         wallet_payload: dict[str, Any] | None,
@@ -764,7 +1077,12 @@ class TradingService:
             self._invalidate_wallet_cache()
         return converted_count
 
-    def _next_cooldown_seconds(self, row: dict[str, Any] | None = None) -> int:
+    def _next_cooldown_seconds(
+        self,
+        row: dict[str, Any] | None = None,
+        *,
+        extra_multiplier: float = 1.0,
+    ) -> int:
         low = max(1, self.settings.cooldown_min_seconds)
         high = max(low, self.settings.cooldown_max_seconds)
         if low == high:
@@ -775,6 +1093,7 @@ class TradingService:
         multiplier = 1.0
         if row is not None:
             multiplier = self._adaptive_cooldown_multiplier(row)
+        multiplier *= max(0.2, extra_multiplier)
         return max(1, int(round(base_value * multiplier)))
 
     def _base_notional_usdt(
@@ -859,8 +1178,12 @@ class TradingService:
             rows_by_symbol = {
                 str(row.get("symbol")): row for row in market_rows if row.get("symbol")
             }
+            adaptive_profile = self._derive_auto_adapt_profile(market_rows)
             forward_risk_multiplier, forward_reason = self._compute_forward_guardrail(now)
-            self.state.auto_trade_last_risk_multiplier = forward_risk_multiplier
+            effective_risk_multiplier = (
+                forward_risk_multiplier * float(adaptive_profile["risk_mult"])
+            )
+            self.state.auto_trade_last_risk_multiplier = effective_risk_multiplier
 
             for symbol, position in list(self.state.auto_trade_positions.items()):
                 row = rows_by_symbol.get(symbol)
@@ -899,11 +1222,20 @@ class TradingService:
                             realized_amount,
                         )
                         self.state.auto_trade_daily_pnl[day_key] += realized_pnl
+                        self._paper_wallet_on_close(
+                            position=position,
+                            closed_amount=realized_amount,
+                            open_amount_before_close=amount,
+                            pnl_usdt=realized_pnl,
+                        )
                         position["amount"] = max(0.0, amount - realized_amount)
                         position["partial_tp_done"] = True
                         self.state.auto_trade_last_action_ts[symbol] = now
                         self.state.auto_trade_cooldown_until[symbol] = (
-                            now + self._next_cooldown_seconds(row)
+                            now + self._next_cooldown_seconds(
+                                row,
+                                extra_multiplier=float(adaptive_profile["cooldown_mult"]),
+                            )
                         )
                         self._record_journal(
                             symbol=symbol,
@@ -916,6 +1248,15 @@ class TradingService:
                             price=current_price,
                             amount=realized_amount,
                             metadata={"remaining_amount": round(position["amount"], 8)},
+                        )
+                        self._copy_trade_on_exit(
+                            symbol=symbol,
+                            position_side=position_side,
+                            order_side=exit_side,
+                            exit_price=current_price,
+                            master_amount=realized_amount,
+                            reason="PARTIAL TAKE PROFIT",
+                            partial=True,
                         )
                         self.push_auto_trade_event(
                             symbol,
@@ -990,8 +1331,17 @@ class TradingService:
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 pnl_usdt = self._pnl_usdt(position_side, entry_price, current_price, filled_amount)
                 self.state.auto_trade_daily_pnl[day_key] += pnl_usdt
+                self._paper_wallet_on_close(
+                    position=position,
+                    closed_amount=filled_amount,
+                    open_amount_before_close=amount,
+                    pnl_usdt=pnl_usdt,
+                )
                 self.state.auto_trade_last_action_ts[symbol] = now
-                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(row)
+                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(
+                    row,
+                    extra_multiplier=float(adaptive_profile["cooldown_mult"]),
+                )
                 self.state.auto_trade_positions.pop(symbol, None)
                 status_reason = f"{symbol}: {position_side} closed ({reason})"
                 self._update_symbol_stats(symbol, pnl_usdt)
@@ -1005,6 +1355,15 @@ class TradingService:
                     notional_usdt=safe_float(position.get("notional_usdt")),
                     price=current_price,
                     amount=filled_amount,
+                )
+                self._copy_trade_on_exit(
+                    symbol=symbol,
+                    position_side=position_side,
+                    order_side=exit_side,
+                    exit_price=current_price,
+                    master_amount=filled_amount,
+                    reason=reason,
+                    partial=False,
                 )
 
                 self.push_auto_trade_event(
@@ -1155,7 +1514,11 @@ class TradingService:
                     status_reason = f"{symbol}: {reason_text}"
                     continue
 
-                ai_ok, ai_reason = self._ai_filter_allows(row, entry_side)
+                ai_ok, ai_reason = self._ai_filter_allows(
+                    row,
+                    entry_side,
+                    min_confidence_override=int(adaptive_profile["ai_min_confidence"]),
+                )
                 if not ai_ok:
                     status_reason = f"{symbol}: AI filter blocked ({ai_reason})"
                     continue
@@ -1170,7 +1533,7 @@ class TradingService:
                 notional_usdt = self._base_notional_usdt(
                     available_usdt,
                     row,
-                    risk_multiplier=forward_risk_multiplier,
+                    risk_multiplier=effective_risk_multiplier,
                 )
 
                 min_notional_usdt = self.get_symbol_min_notional_usdt(symbol)
@@ -1237,6 +1600,21 @@ class TradingService:
 
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 entry_price = safe_float(order_result.get("average")) or current_price
+                if not self._paper_wallet_on_entry(notional_usdt):
+                    status_reason = (
+                        f"{symbol}: insufficient PAPER wallet USDT "
+                        f"({notional_usdt:.2f} required)"
+                    )
+                    self.push_auto_trade_event(
+                        symbol,
+                        "ENTRY_FAILED",
+                        f"{exchange_side.upper()} ({entry_side})",
+                        "Insufficient PAPER wallet USDT",
+                        price=current_price,
+                        amount=amount,
+                        success=False,
+                    )
+                    continue
 
                 self.state.auto_trade_positions[symbol] = {
                     "side": entry_side,
@@ -1251,11 +1629,25 @@ class TradingService:
                     "partial_tp_done": False,
                     "break_even_armed": False,
                 }
+                self._copy_trade_on_entry(
+                    symbol=symbol,
+                    position_side=entry_side,
+                    order_side=exchange_side,
+                    entry_price=entry_price,
+                    amount=filled_amount,
+                    notional_usdt=notional_usdt,
+                )
                 self.state.auto_trade_last_action_ts[symbol] = now
-                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(row)
+                self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(
+                    row,
+                    extra_multiplier=float(adaptive_profile["cooldown_mult"]),
+                )
                 if available_usdt is not None:
                     available_usdt = max(0.0, available_usdt - notional_usdt)
-                status_reason = f"{symbol}: {entry_side} opened at {entry_price:.6f}"
+                status_reason = (
+                    f"{symbol}: {entry_side} opened at {entry_price:.6f} • "
+                    f"profile {adaptive_profile['name']}"
+                )
                 if forward_reason:
                     status_reason = f"{status_reason} • {forward_reason}"
 
@@ -1301,11 +1693,15 @@ class TradingService:
                         "atr_pct": row.get("atr_pct"),
                         "volume_ratio": row.get("volume_ratio"),
                         "guardrail_mult": round(forward_risk_multiplier, 4),
+                        "adaptive_profile": adaptive_profile["name"],
+                        "adaptive_mult": round(float(adaptive_profile["risk_mult"]), 4),
                     },
                 )
 
             if forward_reason and "guardrail" not in status_reason.lower():
                 status_reason = f"{status_reason} • {forward_reason}"
+            if "profile" not in status_reason.lower():
+                status_reason = f"{status_reason} • profile {adaptive_profile['name']}"
             self.state.auto_trade_last_reason = status_reason
 
     def build_auto_trade_status(self, selected_symbol: str) -> dict[str, Any]:
@@ -1345,6 +1741,18 @@ class TradingService:
                 "ai_filter_enabled": self.settings.ai_filter_enabled,
                 "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),
+                "adaptive_enabled": self.settings.auto_trade_auto_adapt_enabled,
+                "adaptive_profile": self.state.auto_trade_adaptive_profile,
+                "adaptive_reason": self.state.auto_trade_adaptive_reason,
+                "adaptive_ai_min_confidence": self.state.auto_trade_adaptive_ai_min_confidence,
+                "adaptive_risk_multiplier": round(
+                    self.state.auto_trade_adaptive_risk_multiplier,
+                    4,
+                ),
+                "adaptive_cooldown_multiplier": round(
+                    self.state.auto_trade_adaptive_cooldown_multiplier,
+                    4,
+                ),
                 "auto_convert_to_usdt": self.settings.auto_trade_auto_convert_to_usdt,
                 "auto_convert_min_usdt": round(self.settings.auto_trade_auto_convert_min_usdt, 4),
                 "auto_convert_interval_seconds": (
@@ -1367,5 +1775,20 @@ class TradingService:
                 "recent_events": list(self.state.auto_trade_events)[-12:],
                 "recent_journal": list(self.state.auto_trade_journal)[-12:],
                 "stats_by_symbol": self.state.auto_trade_stats_by_symbol,
+                "copy_trade_enabled": self._copy_trade_is_enabled(),
+                "copy_trade_followers": [
+                    {
+                        "name": str(follower["name"]),
+                        "multiplier": round(float(follower["multiplier"]), 4),
+                    }
+                    for follower in self._copy_followers
+                ],
+                "copy_trade_slippage_bps": round(self.settings.copy_trade_slippage_bps, 2),
+                "copy_trade_recent_events": list(self.state.copy_trade_events)[-20:],
+                "copy_trade_stats": self.state.copy_trade_stats,
+                "copy_trade_open_positions": {
+                    follower: len(positions)
+                    for follower, positions in self.state.copy_trade_positions.items()
+                },
                 "last_reason": self.state.auto_trade_last_reason,
             }

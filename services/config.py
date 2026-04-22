@@ -86,6 +86,43 @@ def parse_env_symbols(raw_value: str | None) -> list[str]:
     return symbols if symbols else DEFAULT_SYMBOLS.copy()
 
 
+def parse_copy_trade_followers(raw_value: str | None) -> tuple[tuple[str, float], ...]:
+    if not raw_value:
+        return ()
+
+    followers: list[tuple[str, float]] = []
+    seen: set[str] = set()
+
+    for raw_part in raw_value.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+
+        if ":" in part:
+            name_raw, mult_raw = part.split(":", 1)
+        else:
+            name_raw, mult_raw = part, "1.0"
+
+        name = name_raw.strip()
+        if not name:
+            continue
+
+        key = name.lower()
+        if key in seen:
+            continue
+
+        try:
+            multiplier = float(mult_raw.strip())
+        except (TypeError, ValueError):
+            multiplier = 1.0
+
+        multiplier = max(0.05, min(multiplier, 5.0))
+        followers.append((name, multiplier))
+        seen.add(key)
+
+    return tuple(followers)
+
+
 def parse_default_timeframe(raw_value: str | None) -> str:
     timeframe = (raw_value or FALLBACK_DEFAULT_TIMEFRAME).strip()
     if timeframe in ALLOWED_TIMEFRAMES:
@@ -170,6 +207,8 @@ class Settings:
     telegram_auto_trade_only: bool
     auto_trade_enabled: bool
     paper_trading: bool
+    paper_wallet_enabled: bool
+    paper_wallet_start_usdt: float
     trade_size_usdt: float
     trade_size_percent: float
     auto_trade_min_notional_usdt: float
@@ -228,6 +267,14 @@ class Settings:
     ai_filter_enabled: bool
     ai_filter_min_confidence: int
     ai_filter_min_score_abs: float
+    auto_trade_auto_adapt_enabled: bool
+    auto_trade_auto_adapt_low_atr_pct: float
+    auto_trade_auto_adapt_high_atr_pct: float
+    auto_trade_auto_adapt_conf_step: int
+    auto_trade_auto_adapt_risk_on_mult: float
+    auto_trade_auto_adapt_risk_off_mult: float
+    auto_trade_auto_adapt_cooldown_on_mult: float
+    auto_trade_auto_adapt_cooldown_off_mult: float
     auto_trade_forward_guardrail_enabled: bool
     auto_trade_forward_guardrail_min_trades: int
     auto_trade_forward_baseline_win_rate: float
@@ -235,6 +282,9 @@ class Settings:
     auto_trade_forward_guardrail_risk_mult: float
     auto_trade_forward_guardrail_severe_win_rate: float
     auto_trade_forward_guardrail_halt_enabled: bool
+    copy_trade_enabled: bool
+    copy_trade_followers: tuple[tuple[str, float], ...]
+    copy_trade_slippage_bps: float
     auto_trade_symbols: list[str]
     auto_trade_symbols_set: set[str]
     service_started_at: int
@@ -247,6 +297,11 @@ def load_settings() -> Settings:
 
     auto_trade_enabled = parse_env_bool(os.getenv("AUTO_TRADE_ENABLED"), False)
     paper_trading = parse_env_bool(os.getenv("PAPER_TRADING"), True)
+    paper_wallet_enabled = parse_env_bool(os.getenv("PAPER_WALLET_ENABLED"), True)
+    paper_wallet_start_usdt = max(
+        parse_env_float(os.getenv("PAPER_WALLET_START_USDT"), 10000.0),
+        0.0,
+    )
     api_key = (os.getenv("API_KEY") or "").strip()
     api_secret = (os.getenv("API_SECRET") or "").strip()
     telegram_enabled = parse_env_bool(os.getenv("TELEGRAM_ENABLED"), False)
@@ -503,6 +558,46 @@ def load_settings() -> Settings:
         False,
     )
 
+    auto_trade_auto_adapt_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_AUTO_ADAPT_ENABLED"),
+        True,
+    )
+    auto_trade_auto_adapt_low_atr_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_LOW_ATR_PCT"), 0.9),
+        0.05,
+    )
+    auto_trade_auto_adapt_high_atr_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_HIGH_ATR_PCT"), 2.2),
+        auto_trade_auto_adapt_low_atr_pct,
+    )
+    auto_trade_auto_adapt_conf_step = min(
+        max(parse_env_int(os.getenv("AUTO_TRADE_AUTO_ADAPT_CONF_STEP"), 8), 0),
+        40,
+    )
+    auto_trade_auto_adapt_risk_on_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_RISK_ON_MULT"), 1.15),
+        0.2,
+    )
+    auto_trade_auto_adapt_risk_off_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_RISK_OFF_MULT"), 0.7), 0.05),
+        1.0,
+    )
+    auto_trade_auto_adapt_cooldown_on_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_COOLDOWN_ON_MULT"), 0.8),
+        0.2,
+    )
+    auto_trade_auto_adapt_cooldown_off_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_ADAPT_COOLDOWN_OFF_MULT"), 1.4),
+        1.0,
+    )
+
+    copy_trade_enabled = parse_env_bool(os.getenv("COPY_TRADE_ENABLED"), False)
+    copy_trade_followers = parse_copy_trade_followers(os.getenv("COPY_TRADE_FOLLOWERS"))
+    copy_trade_slippage_bps = min(
+        max(parse_env_float(os.getenv("COPY_TRADE_SLIPPAGE_BPS"), 4.0), 0.0),
+        50.0,
+    )
+
     return Settings(
         title="Nurix Trading Dashboard",
         signal_timeframe="1m",
@@ -538,6 +633,8 @@ def load_settings() -> Settings:
         telegram_auto_trade_only=telegram_auto_trade_only,
         auto_trade_enabled=auto_trade_enabled,
         paper_trading=paper_trading,
+        paper_wallet_enabled=paper_wallet_enabled,
+        paper_wallet_start_usdt=paper_wallet_start_usdt,
         trade_size_usdt=trade_size_usdt,
         trade_size_percent=min(
             max(parse_env_float(os.getenv("TRADE_SIZE_PERCENT"), 0.0), 0.0),
@@ -617,6 +714,14 @@ def load_settings() -> Settings:
             parse_env_float(os.getenv("AI_FILTER_MIN_SCORE_ABS"), 1.0),
             0.0,
         ),
+        auto_trade_auto_adapt_enabled=auto_trade_auto_adapt_enabled,
+        auto_trade_auto_adapt_low_atr_pct=auto_trade_auto_adapt_low_atr_pct,
+        auto_trade_auto_adapt_high_atr_pct=auto_trade_auto_adapt_high_atr_pct,
+        auto_trade_auto_adapt_conf_step=auto_trade_auto_adapt_conf_step,
+        auto_trade_auto_adapt_risk_on_mult=auto_trade_auto_adapt_risk_on_mult,
+        auto_trade_auto_adapt_risk_off_mult=auto_trade_auto_adapt_risk_off_mult,
+        auto_trade_auto_adapt_cooldown_on_mult=auto_trade_auto_adapt_cooldown_on_mult,
+        auto_trade_auto_adapt_cooldown_off_mult=auto_trade_auto_adapt_cooldown_off_mult,
         auto_trade_forward_guardrail_enabled=auto_trade_forward_guardrail_enabled,
         auto_trade_forward_guardrail_min_trades=auto_trade_forward_guardrail_min_trades,
         auto_trade_forward_baseline_win_rate=auto_trade_forward_baseline_win_rate,
@@ -624,6 +729,9 @@ def load_settings() -> Settings:
         auto_trade_forward_guardrail_risk_mult=auto_trade_forward_guardrail_risk_mult,
         auto_trade_forward_guardrail_severe_win_rate=auto_trade_forward_guardrail_severe_win_rate,
         auto_trade_forward_guardrail_halt_enabled=auto_trade_forward_guardrail_halt_enabled,
+        copy_trade_enabled=copy_trade_enabled,
+        copy_trade_followers=copy_trade_followers,
+        copy_trade_slippage_bps=copy_trade_slippage_bps,
         auto_trade_symbols=auto_trade_symbols,
         auto_trade_symbols_set=set(auto_trade_symbols),
         service_started_at=int(time.time()),

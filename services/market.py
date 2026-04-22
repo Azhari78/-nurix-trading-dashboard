@@ -134,6 +134,8 @@ class MarketService:
                     "macd": float(cached["macd"]),
                     "macd_signal": float(cached["macd_signal"]),
                     "last_close": float(cached["last_close"]),
+                    "atr_pct": float(cached.get("atr_pct") or 0.0),
+                    "volume_ratio": float(cached.get("volume_ratio") or 1.0),
                 }
             raise
 
@@ -421,6 +423,78 @@ class MarketService:
     def build_orderflow_payload(self, symbol: str) -> dict[str, Any]:
         return self.market_state.get_orderflow_payload(symbol)
 
+    def _build_paper_wallet_payload_locked(self, now: float) -> dict[str, Any]:
+        if not self.state.paper_wallet_initialized:
+            self.state.paper_wallet_initialized = True
+            self.state.paper_wallet_free_usdt = float(self.settings.paper_wallet_start_usdt)
+            self.state.paper_wallet_used_usdt = 0.0
+            self.state.paper_wallet_realized_pnl_usdt = 0.0
+
+        free_usdt = max(0.0, float(self.state.paper_wallet_free_usdt))
+        used_usdt = max(0.0, float(self.state.paper_wallet_used_usdt))
+        total_usdt = max(0.0, free_usdt + used_usdt)
+
+        day_key = self.utc_day_key()
+        if self.state.wallet_day_key != day_key:
+            self.state.wallet_day_key = day_key
+            self.state.wallet_day_start_total_usdt = (
+                total_usdt if total_usdt > 0 else None
+            )
+        if self.state.wallet_day_start_total_usdt is None and total_usdt > 0:
+            self.state.wallet_day_start_total_usdt = total_usdt
+
+        day_start_total = self.state.wallet_day_start_total_usdt
+        daily_pnl_estimate = (
+            total_usdt - day_start_total
+            if day_start_total is not None
+            else None
+        )
+        daily_pnl_pct = (
+            (daily_pnl_estimate / day_start_total * 100)
+            if daily_pnl_estimate is not None and day_start_total and day_start_total > 0
+            else None
+        )
+
+        payload = {
+            "enabled": True,
+            "connected": True,
+            "exchange": f"{self.settings.exchange_name}-paper",
+            "updated_at": int(now),
+            "asset_count": 1,
+            "total_usdt_estimate": round(total_usdt, 2),
+            "usdt_free": round(free_usdt, 6),
+            "usdt_total": round(total_usdt, 6),
+            "assets": [
+                {
+                    "asset": "USDT",
+                    "free": round(free_usdt, 8),
+                    "used": round(used_usdt, 8),
+                    "total": round(total_usdt, 8),
+                    "price_usdt": 1.0,
+                    "usdt_value": round(total_usdt, 6),
+                }
+            ],
+            "error": None,
+            "daily_pnl_estimate_usdt": (
+                round(daily_pnl_estimate, 2)
+                if daily_pnl_estimate is not None
+                else None
+            ),
+            "daily_pnl_estimate_pct": (
+                round(daily_pnl_pct, 2)
+                if daily_pnl_pct is not None
+                else None
+            ),
+            "day_start_total_usdt": (
+                round(day_start_total, 2)
+                if day_start_total is not None
+                else None
+            ),
+            "pnl_day_key": day_key,
+            "pnl_basis": "paper_sim",
+        }
+        return payload
+
     def build_wallet_payload(self, market_rows: list[dict[str, Any]]) -> dict[str, Any]:
         now = time.time()
 
@@ -429,6 +503,12 @@ class MarketService:
             cached_updated_at = safe_float(self.state.wallet_cache.get("updated_at")) or 0.0
             if cached and now - cached_updated_at < self.settings.wallet_cache_seconds:
                 return cached
+
+            if self.settings.paper_trading and self.settings.paper_wallet_enabled:
+                payload = self._build_paper_wallet_payload_locked(now)
+                self.state.wallet_cache["updated_at"] = now
+                self.state.wallet_cache["payload"] = payload
+                return payload
 
             if not self.settings.api_key or not self.settings.api_secret:
                 payload = {

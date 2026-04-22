@@ -19,6 +19,10 @@ class RuntimeState:
 
         self.wallet_lock = threading.Lock()
         self.auto_trade_lock = threading.Lock()
+        self.paper_wallet_initialized = False
+        self.paper_wallet_free_usdt = 0.0
+        self.paper_wallet_used_usdt = 0.0
+        self.paper_wallet_realized_pnl_usdt = 0.0
 
         self.auto_trade_events: deque[dict[str, Any]] = deque(maxlen=auto_trade_max_events)
         self.auto_trade_counter = 0
@@ -35,9 +39,18 @@ class RuntimeState:
         self.auto_trade_guardrail_active = False
         self.auto_trade_guardrail_reason = ""
         self.auto_trade_last_reason = "Waiting for market conditions"
+        self.auto_trade_adaptive_profile = "BALANCED"
+        self.auto_trade_adaptive_reason = ""
+        self.auto_trade_adaptive_ai_min_confidence = 0
+        self.auto_trade_adaptive_risk_multiplier = 1.0
+        self.auto_trade_adaptive_cooldown_multiplier = 1.0
         self.auto_trade_last_convert_at = 0.0
         self.auto_trade_journal: deque[dict[str, Any]] = deque(maxlen=1000)
         self.auto_trade_stats_by_symbol: dict[str, dict[str, Any]] = {}
+        self.copy_trade_events: deque[dict[str, Any]] = deque(maxlen=max(50, auto_trade_max_events))
+        self.copy_trade_counter = 0
+        self.copy_trade_positions: dict[str, dict[str, dict[str, Any]]] = {}
+        self.copy_trade_stats: dict[str, dict[str, Any]] = {}
 
         self.markets_loaded = False
 

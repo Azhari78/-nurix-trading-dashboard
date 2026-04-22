@@ -60,7 +60,10 @@ const autoTradeRiskNode = document.getElementById("auto-trade-risk");
 const autoTradeSymbolsNode = document.getElementById("auto-trade-symbols");
 const autoTradeSelectedNode = document.getElementById("auto-trade-selected");
 const autoTradeNoteNode = document.getElementById("auto-trade-note");
+const autoTradeAdaptiveNode = document.getElementById("auto-trade-adaptive");
+const autoTradeCopyNode = document.getElementById("auto-trade-copy");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
+const copyTradeEventsNode = document.getElementById("copy-trade-events");
 
 const walletStatusNode = document.getElementById("wallet-status");
 const walletExchangeNode = document.getElementById("wallet-exchange");
@@ -713,6 +716,21 @@ function renderAutoTrade(payload) {
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
   const lastReason = String(data.last_reason || "-");
+  const adaptiveEnabled = Boolean(data.adaptive_enabled);
+  const adaptiveProfile = String(data.adaptive_profile || "BALANCED");
+  const adaptiveReason = String(data.adaptive_reason || "");
+  const adaptiveAiMinConfidence = Number(data.adaptive_ai_min_confidence);
+  const adaptiveRiskMultiplier = Number(data.adaptive_risk_multiplier);
+  const adaptiveCooldownMultiplier = Number(data.adaptive_cooldown_multiplier);
+  const copyTradeEnabled = Boolean(data.copy_trade_enabled);
+  const copyTradeFollowers = Array.isArray(data.copy_trade_followers)
+    ? data.copy_trade_followers
+    : [];
+  const copyTradeSlippageBps = Number(data.copy_trade_slippage_bps);
+  const copyTradeRecentEvents = Array.isArray(data.copy_trade_recent_events)
+    ? data.copy_trade_recent_events
+    : [];
+  const copyTradeOpenPositions = data.copy_trade_open_positions || {};
   const strategyLabel = strategyModeRaw === "both"
     ? "LONG+SHORT"
     : strategyModeRaw === "short_only"
@@ -763,6 +781,9 @@ function renderAutoTrade(payload) {
     const aiText = aiFilterEnabled
       ? `AI ON (>=${Number.isNaN(aiFilterMinConfidence) ? "-" : aiFilterMinConfidence}% / abs ${Number.isNaN(aiFilterMinScoreAbs) ? "-" : fmtNumber(aiFilterMinScoreAbs, 2)})`
       : "AI OFF";
+    const adaptiveText = adaptiveEnabled
+      ? `${adaptiveProfile} (AI>=${Number.isNaN(adaptiveAiMinConfidence) ? "-" : adaptiveAiMinConfidence}%, risk x${Number.isNaN(adaptiveRiskMultiplier) ? "-" : fmtNumber(adaptiveRiskMultiplier, 2)}, cd x${Number.isNaN(adaptiveCooldownMultiplier) ? "-" : fmtNumber(adaptiveCooldownMultiplier, 2)})`
+      : "Adaptive OFF";
     const guardrailText = guardrailActive
       ? `Guardrail ON x${Number.isNaN(riskMultiplier) ? "-" : fmtNumber(riskMultiplier, 2)}`
       : "Guardrail OFF";
@@ -776,7 +797,7 @@ function renderAutoTrade(payload) {
       : maxOpenPositions <= 0
         ? `${openPositions}/Unlimited`
         : `${openPositions}/${maxOpenPositions}`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • ${guardrailText} • ${autoConvertText} • ${lossesText} • Open ${openText}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${lossesText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
@@ -797,35 +818,88 @@ function renderAutoTrade(payload) {
     autoTradeNoteNode.textContent = lastReason;
   }
 
-  if (!autoTradeEventsNode) return;
-
-  if (recentEvents.length === 0) {
-    autoTradeEventsNode.innerHTML =
-      `<tr><td colspan="6" class="mini-empty">No auto-trade events yet.</td></tr>`;
-    return;
+  if (autoTradeAdaptiveNode) {
+    const adaptiveLabel = adaptiveEnabled ? adaptiveProfile : "OFF";
+    const adaptiveDetail = adaptiveReason ? ` • ${adaptiveReason}` : "";
+    autoTradeAdaptiveNode.textContent = `${adaptiveLabel}${adaptiveDetail}`;
   }
 
-  const events = [...recentEvents].reverse().slice(0, 20);
-  autoTradeEventsNode.innerHTML = events
-    .map((event) => {
-      const ts = formatAlertTime(event.timestamp);
-      const symbol = escapeHtml(event.symbol || "-");
-      const action = escapeHtml(event.action || "-");
-      const message = escapeHtml(event.message || "-");
-      const pnl = event.pnl_usdt == null ? "-" : `${fmtNumber(event.pnl_usdt, 2)} USDT`;
-      const mode = escapeHtml(String(event.mode || "-").toUpperCase());
-      return `
-        <tr>
-          <td>${ts}</td>
-          <td>${symbol}</td>
-          <td>${action}</td>
-          <td>${message}</td>
-          <td>${pnl}</td>
-          <td>${mode}</td>
-        </tr>
-      `;
-    })
-    .join("");
+  if (autoTradeCopyNode) {
+    if (!copyTradeEnabled) {
+      autoTradeCopyNode.textContent = "OFF";
+    } else {
+      const followerLabel = copyTradeFollowers.length > 0
+        ? copyTradeFollowers
+            .map((follower) => {
+              const name = String(follower.name || "-");
+              const multiplier = Number(follower.multiplier);
+              const openCount = Number(copyTradeOpenPositions[name] || 0);
+              return `${name} x${Number.isNaN(multiplier) ? "-" : fmtNumber(multiplier, 2)} (open ${openCount})`;
+            })
+            .join(", ")
+        : "No followers";
+      const slippageLabel = Number.isNaN(copyTradeSlippageBps)
+        ? "-"
+        : fmtNumber(copyTradeSlippageBps, 1);
+      autoTradeCopyNode.textContent = `${followerLabel} • slippage ${slippageLabel}bps`;
+    }
+  }
+
+  if (autoTradeEventsNode) {
+    if (recentEvents.length === 0) {
+      autoTradeEventsNode.innerHTML =
+        `<tr><td colspan="6" class="mini-empty">No auto-trade events yet.</td></tr>`;
+    } else {
+      const events = [...recentEvents].reverse().slice(0, 20);
+      autoTradeEventsNode.innerHTML = events
+        .map((event) => {
+          const ts = formatAlertTime(event.timestamp);
+          const symbol = escapeHtml(event.symbol || "-");
+          const action = escapeHtml(event.action || "-");
+          const message = escapeHtml(event.message || "-");
+          const pnl = event.pnl_usdt == null ? "-" : `${fmtNumber(event.pnl_usdt, 2)} USDT`;
+          const mode = escapeHtml(String(event.mode || "-").toUpperCase());
+          return `
+            <tr>
+              <td>${ts}</td>
+              <td>${symbol}</td>
+              <td>${action}</td>
+              <td>${message}</td>
+              <td>${pnl}</td>
+              <td>${mode}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  if (copyTradeEventsNode) {
+    if (!copyTradeEnabled || copyTradeRecentEvents.length === 0) {
+      copyTradeEventsNode.innerHTML =
+        `<tr><td colspan="5" class="mini-empty">No copy-trade events yet.</td></tr>`;
+    } else {
+      const copyEvents = [...copyTradeRecentEvents].reverse().slice(0, 30);
+      copyTradeEventsNode.innerHTML = copyEvents
+        .map((event) => {
+          const ts = formatAlertTime(event.timestamp);
+          const follower = escapeHtml(event.follower || "-");
+          const symbol = escapeHtml(event.symbol || "-");
+          const action = escapeHtml(event.event_type || "-");
+          const pnl = event.pnl_usdt == null ? "-" : `${fmtNumber(event.pnl_usdt, 2)} USDT`;
+          return `
+            <tr>
+              <td>${ts}</td>
+              <td>${follower}</td>
+              <td>${symbol}</td>
+              <td>${action}</td>
+              <td>${pnl}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
+  }
 }
 
 function renderWallet(payload) {
