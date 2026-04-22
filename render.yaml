@@ -37,6 +37,8 @@ services:
         value: "true"
       - key: AUTO_TRADE_MAX_OPEN_POSITIONS
         value: "2"
+      - key: AUTO_TRADE_SYMBOL_VALIDATION_ENABLED
+        value: "true"
       - key: TRADE_SIZE_USDT
         value: "9"
       - key: TRADE_SIZE_USDT_MIN
@@ -45,10 +47,36 @@ services:
         value: "10"
       - key: TRADE_SIZE_PERCENT
         value: "0"
+      - key: AUTO_TRADE_VOLATILITY_SIZING_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_TARGET_ATR_PCT
+        value: "0.9"
+      - key: AUTO_TRADE_VOLATILITY_SIZE_MIN_MULT
+        value: "0.55"
+      - key: AUTO_TRADE_VOLATILITY_SIZE_MAX_MULT
+        value: "1.65"
       - key: AUTO_TRADE_MIN_NOTIONAL_USDT
         value: "3.5"
       - key: AUTO_TRADE_MIN_BUFFER_PCT
         value: "1.5"
+      - key: AUTO_TRADE_ENTRY_CONFIRM_EMA_STACK
+        value: "true"
+      - key: AUTO_TRADE_ENTRY_CONFIRM_MACD
+        value: "true"
+      - key: AUTO_TRADE_MIN_VOLUME_RATIO
+        value: "0.8"
+      - key: AUTO_TRADE_MIN_STRENGTH_CONFIDENCE
+        value: "25"
+      - key: AUTO_TRADE_SESSION_FILTER_ENABLED
+        value: "false"
+      - key: AUTO_TRADE_SESSION_UTC
+        value: "0-23"
+      - key: AUTO_TRADE_EXTREME_VOLATILITY_BLOCK_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_MAX_ATR_PCT
+        value: "5.5"
+      - key: AUTO_TRADE_MAX_ABS_CHANGE_24H_PCT
+        value: "20"
       - key: STOP_LOSS_PCT
         value: "5.0"
       - key: TAKE_PROFIT_PCT
@@ -73,16 +101,54 @@ services:
         value: "7.0"
       - key: SHORT_TRAILING_PCT
         value: "4.0"
+      - key: AUTO_TRADE_PARTIAL_TP_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_PARTIAL_TP_PCT
+        value: "3.0"
+      - key: AUTO_TRADE_PARTIAL_TP_RATIO
+        value: "0.5"
+      - key: AUTO_TRADE_BREAK_EVEN_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_BREAK_EVEN_TRIGGER_PCT
+        value: "1.25"
+      - key: AUTO_TRADE_BREAK_EVEN_BUFFER_PCT
+        value: "0.1"
       - key: COOLDOWN_SECONDS
         value: "600"
       - key: COOLDOWN_MIN_SECONDS
         value: "600"
       - key: COOLDOWN_MAX_SECONDS
         value: "900"
+      - key: AUTO_TRADE_COOLDOWN_ADAPTIVE_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_COOLDOWN_LOSS_STEP_MULT
+        value: "0.35"
+      - key: AUTO_TRADE_COOLDOWN_VOL_TARGET_ATR_PCT
+        value: "0.9"
+      - key: AUTO_TRADE_COOLDOWN_VOL_MAX_MULT
+        value: "3.0"
+      - key: AUTO_TRADE_MAX_CONSECUTIVE_LOSSES
+        value: "3"
+      - key: AUTO_TRADE_KILL_SWITCH_PAUSE_SECONDS
+        value: "1800"
       - key: MAX_DAILY_LOSS_USDT
         value: "20"
       - key: AUTO_TRADE_MIN_CONFIDENCE
         value: "55"
+      - key: AUTO_TRADE_FORWARD_GUARDRAIL_ENABLED
+        value: "true"
+      - key: AUTO_TRADE_FORWARD_GUARDRAIL_MIN_TRADES
+        value: "14"
+      - key: AUTO_TRADE_FORWARD_BASELINE_WIN_RATE
+        value: "0.5"
+      - key: AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USDT
+        value: "0"
+      - key: AUTO_TRADE_FORWARD_GUARDRAIL_RISK_MULT
+        value: "0.6"
+      - key: AUTO_TRADE_FORWARD_GUARDRAIL_SEVERE_WIN_RATE
+        value: "0.35"
+      - key: AUTO_TRADE_FORWARD_GUARDRAIL_HALT_ENABLED
+        value: "false"
       - key: AI_FILTER_ENABLED
         value: "true"
       - key: AI_FILTER_MIN_CONFIDENCE

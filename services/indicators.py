@@ -16,6 +16,9 @@ def safe_float(value: Any) -> float | None:
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     close = pd.to_numeric(df["close"], errors="coerce")
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    volume = pd.to_numeric(df["volume"], errors="coerce")
 
     df["ema20"] = close.ewm(span=20, adjust=False).mean()
     df["ema50"] = close.ewm(span=50, adjust=False).mean()
@@ -35,6 +38,17 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_histogram"] = df["macd"] - df["macd_signal"]
+
+    prev_close = close.shift(1)
+    tr_hl = high - low
+    tr_hc = (high - prev_close).abs()
+    tr_lc = (low - prev_close).abs()
+    true_range = pd.concat([tr_hl, tr_hc, tr_lc], axis=1).max(axis=1)
+    df["atr14"] = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    df["atr_pct"] = (df["atr14"] / close.replace(0, pd.NA)) * 100.0
+
+    df["volume_sma20"] = volume.rolling(window=20, min_periods=5).mean()
+    df["volume_ratio"] = volume / df["volume_sma20"].replace(0, pd.NA)
 
     return df
 

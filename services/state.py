@@ -28,7 +28,15 @@ class RuntimeState:
         self.auto_trade_daily_pnl: dict[str, float] = {}
         self.auto_trade_last_eval_at = 0.0
         self.auto_trade_halt_day: str | None = None
+        self.auto_trade_halt_until = 0.0
+        self.auto_trade_halt_reason: str | None = None
+        self.auto_trade_consecutive_losses = 0
+        self.auto_trade_last_risk_multiplier = 1.0
+        self.auto_trade_guardrail_active = False
+        self.auto_trade_guardrail_reason = ""
         self.auto_trade_last_reason = "Waiting for market conditions"
+        self.auto_trade_journal: deque[dict[str, Any]] = deque(maxlen=1000)
+        self.auto_trade_stats_by_symbol: dict[str, dict[str, Any]] = {}
 
         self.markets_loaded = False
 

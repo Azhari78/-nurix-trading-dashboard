@@ -177,28 +177,61 @@ class Settings:
     auto_trade_strategy_mode: str
     auto_trade_enable_short: bool
     auto_trade_max_open_positions: int
+    auto_trade_symbol_validation_enabled: bool
     trade_size_usdt_min: float
     trade_size_usdt_max: float
+    auto_trade_volatility_sizing_enabled: bool
+    auto_trade_target_atr_pct: float
+    auto_trade_volatility_size_min_mult: float
+    auto_trade_volatility_size_max_mult: float
     long_rsi_min: float
     long_rsi_max: float
     short_rsi_min: float
     short_rsi_max: float
+    auto_trade_entry_confirm_ema_stack: bool
+    auto_trade_entry_confirm_macd: bool
+    auto_trade_min_volume_ratio: float
+    auto_trade_min_strength_confidence: int
+    auto_trade_session_filter_enabled: bool
+    auto_trade_session_utc: str
+    auto_trade_extreme_volatility_block_enabled: bool
+    auto_trade_max_atr_pct: float
+    auto_trade_max_abs_change_24h_pct: float
     long_stop_loss_pct: float
     long_take_profit_pct: float
     long_trailing_pct: float
     short_stop_loss_pct: float
     short_take_profit_pct: float
     short_trailing_pct: float
+    auto_trade_partial_take_profit_enabled: bool
+    auto_trade_partial_take_profit_pct: float
+    auto_trade_partial_take_profit_ratio: float
+    auto_trade_break_even_enabled: bool
+    auto_trade_break_even_trigger_pct: float
+    auto_trade_break_even_buffer_pct: float
     stop_loss_pct: float
     take_profit_pct: float
     cooldown_min_seconds: int
     cooldown_max_seconds: int
     cooldown_seconds: int
+    auto_trade_cooldown_adaptive_enabled: bool
+    auto_trade_cooldown_loss_step_mult: float
+    auto_trade_cooldown_volatility_target_pct: float
+    auto_trade_cooldown_volatility_max_mult: float
+    auto_trade_max_consecutive_losses: int
+    auto_trade_kill_switch_pause_seconds: int
     max_daily_loss_usdt: float
     auto_trade_min_confidence: int
     ai_filter_enabled: bool
     ai_filter_min_confidence: int
     ai_filter_min_score_abs: float
+    auto_trade_forward_guardrail_enabled: bool
+    auto_trade_forward_guardrail_min_trades: int
+    auto_trade_forward_baseline_win_rate: float
+    auto_trade_forward_baseline_avg_pnl_usdt: float
+    auto_trade_forward_guardrail_risk_mult: float
+    auto_trade_forward_guardrail_severe_win_rate: float
+    auto_trade_forward_guardrail_halt_enabled: bool
     auto_trade_symbols: list[str]
     auto_trade_symbols_set: set[str]
     service_started_at: int
@@ -313,6 +346,141 @@ def load_settings() -> Settings:
         parse_env_int(os.getenv("AUTO_TRADE_MAX_OPEN_POSITIONS"), 2),
         1,
     )
+    auto_trade_symbol_validation_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_SYMBOL_VALIDATION_ENABLED"),
+        True,
+    )
+
+    auto_trade_volatility_sizing_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_VOLATILITY_SIZING_ENABLED"),
+        True,
+    )
+    auto_trade_target_atr_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_TARGET_ATR_PCT"), 0.9),
+        0.05,
+    )
+    auto_trade_volatility_size_min_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_VOLATILITY_SIZE_MIN_MULT"), 0.55),
+        0.05,
+    )
+    auto_trade_volatility_size_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_VOLATILITY_SIZE_MAX_MULT"), 1.65),
+        auto_trade_volatility_size_min_mult,
+    )
+
+    auto_trade_entry_confirm_ema_stack = parse_env_bool(
+        os.getenv("AUTO_TRADE_ENTRY_CONFIRM_EMA_STACK"),
+        True,
+    )
+    auto_trade_entry_confirm_macd = parse_env_bool(
+        os.getenv("AUTO_TRADE_ENTRY_CONFIRM_MACD"),
+        True,
+    )
+    auto_trade_min_volume_ratio = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MIN_VOLUME_RATIO"), 0.8),
+        0.0,
+    )
+    auto_trade_min_strength_confidence = min(
+        max(parse_env_int(os.getenv("AUTO_TRADE_MIN_STRENGTH_CONFIDENCE"), 25), 0),
+        100,
+    )
+
+    auto_trade_session_filter_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_SESSION_FILTER_ENABLED"),
+        False,
+    )
+    auto_trade_session_utc = (os.getenv("AUTO_TRADE_SESSION_UTC") or "0-23").strip()
+    auto_trade_extreme_volatility_block_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_EXTREME_VOLATILITY_BLOCK_ENABLED"),
+        True,
+    )
+    auto_trade_max_atr_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MAX_ATR_PCT"), 5.5),
+        0.1,
+    )
+    auto_trade_max_abs_change_24h_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MAX_ABS_CHANGE_24H_PCT"), 20.0),
+        0.1,
+    )
+
+    auto_trade_partial_take_profit_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_PARTIAL_TP_ENABLED"),
+        True,
+    )
+    auto_trade_partial_take_profit_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_PARTIAL_TP_PCT"), 3.0),
+        0.1,
+    )
+    auto_trade_partial_take_profit_ratio = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_PARTIAL_TP_RATIO"), 0.5), 0.05),
+        0.95,
+    )
+    auto_trade_break_even_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_BREAK_EVEN_ENABLED"),
+        True,
+    )
+    auto_trade_break_even_trigger_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_BREAK_EVEN_TRIGGER_PCT"), 1.25),
+        0.1,
+    )
+    auto_trade_break_even_buffer_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_BREAK_EVEN_BUFFER_PCT"), 0.1),
+        0.0,
+    )
+
+    auto_trade_cooldown_adaptive_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_COOLDOWN_ADAPTIVE_ENABLED"),
+        True,
+    )
+    auto_trade_cooldown_loss_step_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COOLDOWN_LOSS_STEP_MULT"), 0.35),
+        0.0,
+    )
+    auto_trade_cooldown_volatility_target_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COOLDOWN_VOL_TARGET_ATR_PCT"), 0.9),
+        0.05,
+    )
+    auto_trade_cooldown_volatility_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COOLDOWN_VOL_MAX_MULT"), 3.0),
+        1.0,
+    )
+    auto_trade_max_consecutive_losses = max(
+        parse_env_int(os.getenv("AUTO_TRADE_MAX_CONSECUTIVE_LOSSES"), 3),
+        1,
+    )
+    auto_trade_kill_switch_pause_seconds = max(
+        parse_env_int(os.getenv("AUTO_TRADE_KILL_SWITCH_PAUSE_SECONDS"), 1800),
+        30,
+    )
+
+    auto_trade_forward_guardrail_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_ENABLED"),
+        True,
+    )
+    auto_trade_forward_guardrail_min_trades = max(
+        parse_env_int(os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_MIN_TRADES"), 14),
+        1,
+    )
+    auto_trade_forward_baseline_win_rate = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_FORWARD_BASELINE_WIN_RATE"), 0.5), 0.0),
+        1.0,
+    )
+    auto_trade_forward_baseline_avg_pnl_usdt = parse_env_float(
+        os.getenv("AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USDT"),
+        0.0,
+    )
+    auto_trade_forward_guardrail_risk_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_RISK_MULT"), 0.6), 0.05),
+        1.0,
+    )
+    auto_trade_forward_guardrail_severe_win_rate = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_SEVERE_WIN_RATE"), 0.35), 0.0),
+        1.0,
+    )
+    auto_trade_forward_guardrail_halt_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_HALT_ENABLED"),
+        False,
+    )
 
     return Settings(
         title="Nurix Trading Dashboard",
@@ -365,23 +533,49 @@ def load_settings() -> Settings:
         auto_trade_strategy_mode=auto_trade_strategy_mode,
         auto_trade_enable_short=auto_trade_enable_short,
         auto_trade_max_open_positions=auto_trade_max_open_positions,
+        auto_trade_symbol_validation_enabled=auto_trade_symbol_validation_enabled,
         trade_size_usdt_min=trade_size_usdt_min,
         trade_size_usdt_max=trade_size_usdt_max,
+        auto_trade_volatility_sizing_enabled=auto_trade_volatility_sizing_enabled,
+        auto_trade_target_atr_pct=auto_trade_target_atr_pct,
+        auto_trade_volatility_size_min_mult=auto_trade_volatility_size_min_mult,
+        auto_trade_volatility_size_max_mult=auto_trade_volatility_size_max_mult,
         long_rsi_min=long_rsi_min,
         long_rsi_max=long_rsi_max,
         short_rsi_min=short_rsi_min,
         short_rsi_max=short_rsi_max,
+        auto_trade_entry_confirm_ema_stack=auto_trade_entry_confirm_ema_stack,
+        auto_trade_entry_confirm_macd=auto_trade_entry_confirm_macd,
+        auto_trade_min_volume_ratio=auto_trade_min_volume_ratio,
+        auto_trade_min_strength_confidence=auto_trade_min_strength_confidence,
+        auto_trade_session_filter_enabled=auto_trade_session_filter_enabled,
+        auto_trade_session_utc=auto_trade_session_utc,
+        auto_trade_extreme_volatility_block_enabled=auto_trade_extreme_volatility_block_enabled,
+        auto_trade_max_atr_pct=auto_trade_max_atr_pct,
+        auto_trade_max_abs_change_24h_pct=auto_trade_max_abs_change_24h_pct,
         long_stop_loss_pct=long_stop_loss_pct,
         long_take_profit_pct=long_take_profit_pct,
         long_trailing_pct=long_trailing_pct,
         short_stop_loss_pct=short_stop_loss_pct,
         short_take_profit_pct=short_take_profit_pct,
         short_trailing_pct=short_trailing_pct,
+        auto_trade_partial_take_profit_enabled=auto_trade_partial_take_profit_enabled,
+        auto_trade_partial_take_profit_pct=auto_trade_partial_take_profit_pct,
+        auto_trade_partial_take_profit_ratio=auto_trade_partial_take_profit_ratio,
+        auto_trade_break_even_enabled=auto_trade_break_even_enabled,
+        auto_trade_break_even_trigger_pct=auto_trade_break_even_trigger_pct,
+        auto_trade_break_even_buffer_pct=auto_trade_break_even_buffer_pct,
         stop_loss_pct=base_stop_loss_pct,
         take_profit_pct=base_take_profit_pct,
         cooldown_min_seconds=cooldown_min_seconds,
         cooldown_max_seconds=cooldown_max_seconds,
         cooldown_seconds=cooldown_seconds,
+        auto_trade_cooldown_adaptive_enabled=auto_trade_cooldown_adaptive_enabled,
+        auto_trade_cooldown_loss_step_mult=auto_trade_cooldown_loss_step_mult,
+        auto_trade_cooldown_volatility_target_pct=auto_trade_cooldown_volatility_target_pct,
+        auto_trade_cooldown_volatility_max_mult=auto_trade_cooldown_volatility_max_mult,
+        auto_trade_max_consecutive_losses=auto_trade_max_consecutive_losses,
+        auto_trade_kill_switch_pause_seconds=auto_trade_kill_switch_pause_seconds,
         max_daily_loss_usdt=max(
             parse_env_float(os.getenv("MAX_DAILY_LOSS_USDT"), 50.0),
             1.0,
@@ -399,6 +593,13 @@ def load_settings() -> Settings:
             parse_env_float(os.getenv("AI_FILTER_MIN_SCORE_ABS"), 1.0),
             0.0,
         ),
+        auto_trade_forward_guardrail_enabled=auto_trade_forward_guardrail_enabled,
+        auto_trade_forward_guardrail_min_trades=auto_trade_forward_guardrail_min_trades,
+        auto_trade_forward_baseline_win_rate=auto_trade_forward_baseline_win_rate,
+        auto_trade_forward_baseline_avg_pnl_usdt=auto_trade_forward_baseline_avg_pnl_usdt,
+        auto_trade_forward_guardrail_risk_mult=auto_trade_forward_guardrail_risk_mult,
+        auto_trade_forward_guardrail_severe_win_rate=auto_trade_forward_guardrail_severe_win_rate,
+        auto_trade_forward_guardrail_halt_enabled=auto_trade_forward_guardrail_halt_enabled,
         auto_trade_symbols=auto_trade_symbols,
         auto_trade_symbols_set=set(auto_trade_symbols),
         service_started_at=int(time.time()),

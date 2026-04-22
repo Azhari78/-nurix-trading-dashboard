@@ -44,6 +44,8 @@ class MarketService:
         self._indicator_last_error: dict[str, str] = {}
         self._row_error_logged_at: dict[str, float] = {}
         self._global_rest_error_logged_at = 0.0
+        self._runtime_symbols = list(settings.symbols)
+        self._symbol_validation_done = False
 
     @staticmethod
     def utc_day_key() -> str:
@@ -86,6 +88,8 @@ class MarketService:
                 "macd": float(cached["macd"]),
                 "macd_signal": float(cached["macd_signal"]),
                 "last_close": float(cached["last_close"]),
+                "atr_pct": float(cached.get("atr_pct") or 0.0),
+                "volume_ratio": float(cached.get("volume_ratio") or 1.0),
             }
 
         backoff_until = self._indicator_backoff_until.get(cache_key, 0.0)
@@ -98,6 +102,8 @@ class MarketService:
                     "macd": float(cached["macd"]),
                     "macd_signal": float(cached["macd_signal"]),
                     "last_close": float(cached["last_close"]),
+                    "atr_pct": float(cached.get("atr_pct") or 0.0),
+                    "volume_ratio": float(cached.get("volume_ratio") or 1.0),
                 }
             raise ValueError(
                 self._indicator_last_error.get(cache_key, "Indicator fetch in cooldown")
@@ -161,6 +167,10 @@ class MarketService:
             "macd": float(last["macd"]),
             "macd_signal": float(last["macd_signal"]),
             "last_close": float(last["close"]),
+            "atr_pct": float(last["atr_pct"]) if pd.notna(last.get("atr_pct")) else 0.0,
+            "volume_ratio": (
+                float(last["volume_ratio"]) if pd.notna(last.get("volume_ratio")) else 1.0
+            ),
         }
         self.state.indicator_cache[cache_key] = payload
         self._indicator_backoff_until.pop(cache_key, None)
@@ -173,7 +183,41 @@ class MarketService:
             "macd": payload["macd"],
             "macd_signal": payload["macd_signal"],
             "last_close": payload["last_close"],
+            "atr_pct": payload["atr_pct"],
+            "volume_ratio": payload["volume_ratio"],
         }
+
+    def _effective_symbols(self) -> list[str]:
+        if self._symbol_validation_done:
+            return self._runtime_symbols
+
+        self._symbol_validation_done = True
+        try:
+            self.exchange.call("load_markets")
+            valid: list[str] = []
+            invalid: list[str] = []
+            for symbol in self.settings.symbols:
+                try:
+                    self.exchange.call("market", symbol)
+                    valid.append(symbol)
+                except Exception:  # noqa: BLE001
+                    invalid.append(symbol)
+
+            if valid:
+                self._runtime_symbols = valid
+            else:
+                self._runtime_symbols = [self.settings.default_symbol]
+
+            if invalid:
+                self.logger.warning(
+                    "Filtered unsupported symbols for %s: %s",
+                    self.settings.exchange_name,
+                    ", ".join(invalid[:8]),
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Could not validate symbols, using configured list: %s", exc)
+
+        return self._runtime_symbols
 
     def build_signal_strength(self, symbol: str) -> dict[str, Any]:
         score_total = 0.0
@@ -218,10 +262,11 @@ class MarketService:
         }
 
     def build_market_rows(self) -> list[dict[str, Any]]:
-        tickers = self.market_state.get_tickers(self.settings.symbols)
+        effective_symbols = self._effective_symbols()
+        tickers = self.market_state.get_tickers(effective_symbols)
         rows: list[dict[str, Any]] = []
 
-        for symbol in self.settings.symbols:
+        for symbol in effective_symbols:
             try:
                 ticker = tickers.get(symbol, {})
                 indicators = self.get_symbol_indicators(symbol)
@@ -269,6 +314,8 @@ class MarketService:
                         "ema50": round(indicators["ema50"], 6),
                         "macd": round(indicators["macd"], 6),
                         "macd_signal": round(indicators["macd_signal"], 6),
+                        "atr_pct": round(float(indicators.get("atr_pct") or 0.0), 3),
+                        "volume_ratio": round(float(indicators.get("volume_ratio") or 1.0), 3),
                         "signal": signal,
                         "strength": strength["label"],
                         "strength_score": strength["score"],
@@ -312,6 +359,8 @@ class MarketService:
                         "ema50": None,
                         "macd": None,
                         "macd_signal": None,
+                        "atr_pct": None,
+                        "volume_ratio": None,
                         "signal": "HOLD",
                         "strength": "HOLD",
                         "strength_score": 0.0,
@@ -765,7 +814,7 @@ class MarketService:
         return {
             "type": "snapshot",
             "timestamp": int(time.time()),
-            "symbols": self.settings.symbols,
+            "symbols": self._effective_symbols(),
             "selected_symbol": selected_symbol,
             "timeframe": timeframe,
             "market": market_rows,

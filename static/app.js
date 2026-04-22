@@ -704,6 +704,9 @@ function renderAutoTrade(payload) {
   const aiFilterEnabled = Boolean(data.ai_filter_enabled);
   const aiFilterMinConfidence = Number(data.ai_filter_min_confidence);
   const aiFilterMinScoreAbs = Number(data.ai_filter_min_score_abs);
+  const riskMultiplier = Number(data.risk_multiplier);
+  const guardrailActive = Boolean(data.guardrail_active);
+  const consecutiveLosses = Number(data.consecutive_losses || 0);
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
@@ -758,9 +761,13 @@ function renderAutoTrade(payload) {
     const aiText = aiFilterEnabled
       ? `AI ON (>=${Number.isNaN(aiFilterMinConfidence) ? "-" : aiFilterMinConfidence}% / abs ${Number.isNaN(aiFilterMinScoreAbs) ? "-" : fmtNumber(aiFilterMinScoreAbs, 2)})`
       : "AI OFF";
+    const guardrailText = guardrailActive
+      ? `Guardrail ON x${Number.isNaN(riskMultiplier) ? "-" : fmtNumber(riskMultiplier, 2)}`
+      : "Guardrail OFF";
+    const lossesText = `Losing Streak ${Number.isNaN(consecutiveLosses) ? 0 : consecutiveLosses}`;
     const shortText = shortEnabled ? "SHORT ON" : "SHORT OFF";
     const openText = Number.isNaN(maxOpenPositions) ? `${openPositions}` : `${openPositions}/${maxOpenPositions}`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • Open ${openText}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • ${guardrailText} • ${lossesText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
