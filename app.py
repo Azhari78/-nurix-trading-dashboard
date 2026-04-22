@@ -36,7 +36,7 @@ market_state = MarketStateManager(
     orderbook_depth=settings.orderbook_depth,
 )
 exchange_stream = ExchangeStreamService(settings, market_state, logger)
-alerts = AlertService(state)
+alerts = AlertService(state, settings=settings, logger=logger)
 trading = TradingService(settings, state, exchange, alerts, logger)
 market = MarketService(settings, state, exchange, market_state, alerts, trading, logger)
 ws_manager = WebSocketManager(

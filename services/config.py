@@ -164,6 +164,10 @@ class Settings:
     api_key: str
     api_secret: str
     use_sandbox: bool
+    telegram_enabled: bool
+    telegram_bot_token: str
+    telegram_chat_id: str
+    telegram_auto_trade_only: bool
     auto_trade_enabled: bool
     paper_trading: bool
     trade_size_usdt: float
@@ -209,6 +213,20 @@ def load_settings() -> Settings:
     paper_trading = parse_env_bool(os.getenv("PAPER_TRADING"), True)
     api_key = (os.getenv("API_KEY") or "").strip()
     api_secret = (os.getenv("API_SECRET") or "").strip()
+    telegram_enabled = parse_env_bool(os.getenv("TELEGRAM_ENABLED"), False)
+    telegram_bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    telegram_chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    telegram_auto_trade_only = parse_env_bool(
+        os.getenv("TELEGRAM_AUTO_TRADE_ONLY"),
+        True,
+    )
+
+    if telegram_enabled and (not telegram_bot_token or not telegram_chat_id):
+        logger.warning(
+            "TELEGRAM_ENABLED is true but TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are missing. "
+            "Telegram disabled."
+        )
+        telegram_enabled = False
 
     requested_auto_trade_symbols = (
         parse_env_symbols(os.getenv("AUTO_TRADE_SYMBOLS"))
@@ -325,6 +343,10 @@ def load_settings() -> Settings:
         api_key=api_key,
         api_secret=api_secret,
         use_sandbox=parse_env_bool(os.getenv("USE_SANDBOX"), False),
+        telegram_enabled=telegram_enabled,
+        telegram_bot_token=telegram_bot_token,
+        telegram_chat_id=telegram_chat_id,
+        telegram_auto_trade_only=telegram_auto_trade_only,
         auto_trade_enabled=auto_trade_enabled,
         paper_trading=paper_trading,
         trade_size_usdt=trade_size_usdt,

@@ -91,9 +91,17 @@ services:
         value: "1.0"
       - key: USE_SANDBOX
         value: "false"
+      - key: TELEGRAM_ENABLED
+        value: "false"
+      - key: TELEGRAM_AUTO_TRADE_ONLY
+        value: "true"
 
       # Set these in Render Dashboard for production.
       - key: API_KEY
         sync: false
       - key: API_SECRET
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
         sync: false
