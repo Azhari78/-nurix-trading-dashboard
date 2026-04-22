@@ -30,22 +30,45 @@ const priceChartContainer = document.getElementById("price-chart");
 const rsiChartContainer = document.getElementById("rsi-chart");
 const macdChartContainer = document.getElementById("macd-chart");
 
-const riskAccountInput = document.getElementById("risk-account");
-const riskPercentInput = document.getElementById("risk-percent");
-const riskStopInput = document.getElementById("risk-stop");
-const riskTpInput = document.getElementById("risk-tp");
-const riskDirectionInput = document.getElementById("risk-direction");
-const riskLeverageInput = document.getElementById("risk-leverage");
+const plannerAccountInput = document.getElementById("planner-account");
+const plannerRiskPercentInput = document.getElementById("planner-risk-percent");
+const plannerEntryPriceInput = document.getElementById("planner-entry-price");
+const plannerStopModeInput = document.getElementById("planner-stop-mode");
+const plannerStopPercentInput = document.getElementById("planner-stop-pct");
+const plannerAtrMultInput = document.getElementById("planner-atr-mult");
+const plannerTp1PercentInput = document.getElementById("planner-tp1-pct");
+const plannerTp1SizeInput = document.getElementById("planner-tp1-size");
+const plannerTp2PercentInput = document.getElementById("planner-tp2-pct");
+const plannerTp2SizeInput = document.getElementById("planner-tp2-size");
+const plannerTp3PercentInput = document.getElementById("planner-tp3-pct");
+const plannerTp3SizeInput = document.getElementById("planner-tp3-size");
+const plannerDirectionInput = document.getElementById("planner-direction");
+const plannerLeverageInput = document.getElementById("planner-leverage");
+const plannerFeeBpsInput = document.getElementById("planner-fee-bps");
+const plannerSlippageBpsInput = document.getElementById("planner-slippage-bps");
+const plannerWinRateInput = document.getElementById("planner-win-rate");
+const plannerAvgWinInput = document.getElementById("planner-avg-win");
+const plannerAvgLossInput = document.getElementById("planner-avg-loss");
 
-const riskOutDirection = document.getElementById("risk-out-direction");
-const riskOutRiskAmount = document.getElementById("risk-out-risk-amount");
-const riskOutEntry = document.getElementById("risk-out-entry");
-const riskOutStopPrice = document.getElementById("risk-out-stop-price");
-const riskOutTpPrice = document.getElementById("risk-out-tp-price");
-const riskOutSize = document.getElementById("risk-out-size");
-const riskOutNotional = document.getElementById("risk-out-notional");
-const riskOutRr = document.getElementById("risk-out-rr");
-const riskOutPnl = document.getElementById("risk-out-pnl");
+const plannerOutDirection = document.getElementById("planner-out-direction");
+const plannerOutEntrySource = document.getElementById("planner-out-entry-source");
+const plannerOutRiskAmount = document.getElementById("planner-out-risk-amount");
+const plannerOutStopPrice = document.getElementById("planner-out-stop-price");
+const plannerOutTp1 = document.getElementById("planner-out-tp1");
+const plannerOutTp2 = document.getElementById("planner-out-tp2");
+const plannerOutTp3 = document.getElementById("planner-out-tp3");
+const plannerOutStopDistance = document.getElementById("planner-out-stop-distance");
+const plannerOutSize = document.getElementById("planner-out-size");
+const plannerOutNotional = document.getElementById("planner-out-notional");
+const plannerOutMargin = document.getElementById("planner-out-margin");
+const plannerOutLiqPrice = document.getElementById("planner-out-liq-price");
+const plannerOutFees = document.getElementById("planner-out-fees");
+const plannerOutNetPnl = document.getElementById("planner-out-net-pnl");
+const plannerOutRr = document.getElementById("planner-out-rr");
+const plannerOutDailyRiskLeft = document.getElementById("planner-out-daily-risk-left");
+const plannerOutAtr = document.getElementById("planner-out-atr");
+const plannerOutExpectancy = document.getElementById("planner-out-expectancy");
+const plannerOutExpectancyInputs = document.getElementById("planner-out-expectancy-inputs");
 
 const alertCountNode = document.getElementById("alert-count");
 const alertsListNode = document.getElementById("alerts-list");
@@ -85,6 +108,7 @@ let selectedSymbol = "BTC/USDT";
 let selectedTimeframe = "1m";
 let marketRows = [];
 let currentSummary = null;
+let latestAutoTrade = {};
 
 let allAlerts = [];
 let alertCutoffId = 0;
@@ -285,7 +309,7 @@ function updateStats(summary) {
     statEma.textContent = "-";
     statSignal.textContent = "-";
     statStrength.textContent = "-";
-    updateRiskPanel();
+    updateTradePlanner();
     return;
   }
 
@@ -318,7 +342,7 @@ function updateStats(summary) {
   if (strengthValue.includes("BUY")) statStrength.classList.add("pos");
   if (strengthValue.includes("SELL")) statStrength.classList.add("neg");
 
-  updateRiskPanel();
+  updateTradePlanner();
 }
 
 function renderMoverList(container, rows, mode) {
@@ -568,76 +592,350 @@ function renderChart(chart) {
   macdChart.timeScale().fitContent();
 }
 
-function getDirection(signal) {
-  const manual = riskDirectionInput.value;
-  if (manual === "long") return "LONG";
-  if (manual === "short") return "SHORT";
-  if (signal === "SELL") return "SHORT";
-  return "LONG";
+function getPlannerDirection() {
+  const manual = plannerDirectionInput ? plannerDirectionInput.value : "long";
+  return manual === "short" ? "SHORT" : "LONG";
 }
 
-function setRiskOutput(node, value) {
+function setPlannerOutput(node, value) {
+  if (!node) return;
   node.textContent = value;
 }
 
-function updateRiskPanel() {
+function setPlannerTone(node, numericValue) {
+  if (!node) return;
+  node.classList.remove("pos", "neg");
+  if (!Number.isFinite(numericValue)) return;
+  if (numericValue > 0) node.classList.add("pos");
+  if (numericValue < 0) node.classList.add("neg");
+}
+
+function getJournalExpectancyStats() {
+  const recentJournal = Array.isArray(latestAutoTrade.recent_journal)
+    ? latestAutoTrade.recent_journal
+    : [];
+  const realized = recentJournal.filter((row) => {
+    const eventType = String(row?.event_type || "").toUpperCase();
+    const pnl = Number(row?.pnl_usdt);
+    return (eventType === "EXIT" || eventType === "PARTIAL_EXIT") && Number.isFinite(pnl);
+  });
+
+  if (realized.length === 0) return null;
+
+  const wins = realized
+    .map((row) => Number(row.pnl_usdt))
+    .filter((pnl) => Number.isFinite(pnl) && pnl > 0);
+  const losses = realized
+    .map((row) => Number(row.pnl_usdt))
+    .filter((pnl) => Number.isFinite(pnl) && pnl < 0)
+    .map((pnl) => Math.abs(pnl));
+
+  const tradeCount = realized.length;
+  const winRatePct = tradeCount > 0 ? (wins.length / tradeCount) * 100 : 0;
+  const avgWin = wins.length > 0 ? wins.reduce((sum, value) => sum + value, 0) / wins.length : 0;
+  const avgLoss = losses.length > 0
+    ? losses.reduce((sum, value) => sum + value, 0) / losses.length
+    : 0;
+
+  return {
+    tradeCount,
+    winRatePct,
+    avgWin,
+    avgLoss,
+  };
+}
+
+function updateTradePlanner() {
+  const requiredNodes = [
+    plannerAccountInput,
+    plannerRiskPercentInput,
+    plannerEntryPriceInput,
+    plannerStopModeInput,
+    plannerStopPercentInput,
+    plannerAtrMultInput,
+    plannerTp1PercentInput,
+    plannerTp1SizeInput,
+    plannerTp2PercentInput,
+    plannerTp2SizeInput,
+    plannerTp3PercentInput,
+    plannerTp3SizeInput,
+    plannerDirectionInput,
+    plannerLeverageInput,
+    plannerFeeBpsInput,
+    plannerSlippageBpsInput,
+    plannerWinRateInput,
+    plannerAvgWinInput,
+    plannerAvgLossInput,
+    plannerOutDirection,
+    plannerOutEntrySource,
+    plannerOutRiskAmount,
+    plannerOutStopPrice,
+    plannerOutTp1,
+    plannerOutTp2,
+    plannerOutTp3,
+    plannerOutStopDistance,
+    plannerOutSize,
+    plannerOutNotional,
+    plannerOutMargin,
+    plannerOutLiqPrice,
+    plannerOutFees,
+    plannerOutNetPnl,
+    plannerOutRr,
+    plannerOutDailyRiskLeft,
+    plannerOutAtr,
+    plannerOutExpectancy,
+    plannerOutExpectancyInputs,
+  ];
+  if (requiredNodes.some((node) => !node)) return;
+
+  const clearNodes = [
+    plannerOutDirection,
+    plannerOutEntrySource,
+    plannerOutRiskAmount,
+    plannerOutStopPrice,
+    plannerOutTp1,
+    plannerOutTp2,
+    plannerOutTp3,
+    plannerOutStopDistance,
+    plannerOutSize,
+    plannerOutNotional,
+    plannerOutMargin,
+    plannerOutLiqPrice,
+    plannerOutFees,
+    plannerOutNetPnl,
+    plannerOutRr,
+    plannerOutDailyRiskLeft,
+    plannerOutAtr,
+    plannerOutExpectancy,
+    plannerOutExpectancyInputs,
+  ];
+
+  const stopMode = String(plannerStopModeInput.value || "percent").toLowerCase();
+  if (stopMode === "atr") {
+    plannerStopPercentInput.disabled = true;
+    plannerAtrMultInput.disabled = false;
+  } else {
+    plannerStopPercentInput.disabled = false;
+    plannerAtrMultInput.disabled = true;
+  }
+
   if (!currentSummary || currentSummary.price == null) {
-    [
-      riskOutDirection,
-      riskOutRiskAmount,
-      riskOutEntry,
-      riskOutStopPrice,
-      riskOutTpPrice,
-      riskOutSize,
-      riskOutNotional,
-      riskOutRr,
-      riskOutPnl,
-    ].forEach((node) => setRiskOutput(node, "-"));
+    clearNodes.forEach((node) => setPlannerOutput(node, "-"));
     return;
   }
 
-  const entry = Number(currentSummary.price);
-  const account = Math.max(Number(riskAccountInput.value) || 0, 0);
-  const riskPct = Math.max(Number(riskPercentInput.value) || 0, 0);
-  const stopPct = Math.max(Number(riskStopInput.value) || 0, 0.01);
-  const tpPct = Math.max(Number(riskTpInput.value) || 0, 0.01);
-  const leverage = Math.max(Number(riskLeverageInput.value) || 1, 1);
+  const liveEntry = Number(currentSummary.price);
+  const manualEntry = Number(plannerEntryPriceInput.value);
+  const entry = manualEntry > 0 ? manualEntry : liveEntry;
+  const entrySource = manualEntry > 0 ? "Manual Entry" : "Live Price";
 
-  const direction = getDirection(currentSummary.signal);
+  const account = Math.max(Number(plannerAccountInput.value) || 0, 0);
+  const riskPct = Math.max(Number(plannerRiskPercentInput.value) || 0, 0);
+  const leverage = Math.max(Number(plannerLeverageInput.value) || 1, 1);
+  const feeBps = Math.max(Number(plannerFeeBpsInput.value) || 0, 0);
+  const slippageBps = Math.max(Number(plannerSlippageBpsInput.value) || 0, 0);
+  const direction = getPlannerDirection();
+  const atrPct = Math.max(Number(currentSummary.atr_pct) || 0, 0);
+  const atrMult = Math.max(Number(plannerAtrMultInput.value) || 0, 0.1);
+  const stopPctManual = Math.max(Number(plannerStopPercentInput.value) || 0, 0.01);
+
+  const stopDistancePct = (
+    stopMode === "atr"
+      ? (atrPct > 0 ? atrPct * atrMult : 0)
+      : stopPctManual
+  );
   const riskAmount = account * (riskPct / 100);
 
   let stopPrice;
-  let takeProfitPrice;
   let riskPerUnit;
-  let rewardPerUnit;
 
   if (direction === "SHORT") {
-    stopPrice = entry * (1 + stopPct / 100);
-    takeProfitPrice = entry * (1 - tpPct / 100);
+    stopPrice = entry * (1 + stopDistancePct / 100);
     riskPerUnit = stopPrice - entry;
-    rewardPerUnit = entry - takeProfitPrice;
   } else {
-    stopPrice = entry * (1 - stopPct / 100);
-    takeProfitPrice = entry * (1 + tpPct / 100);
+    stopPrice = entry * (1 - stopDistancePct / 100);
     riskPerUnit = entry - stopPrice;
-    rewardPerUnit = takeProfitPrice - entry;
   }
 
   const size = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
   const notional = size * entry;
-  const leveragedNotional = notional * leverage;
-  const rr = riskPerUnit > 0 ? rewardPerUnit / riskPerUnit : 0;
-  const potentialPnl = size * rewardPerUnit;
+  const marginRequired = leverage > 0 ? notional / leverage : 0;
+  const sideCostRate = (feeBps + slippageBps) / 10000;
+  const entryCost = notional * sideCostRate;
 
-  setRiskOutput(riskOutDirection, direction);
-  setRiskOutput(riskOutRiskAmount, fmtMoney(riskAmount));
-  setRiskOutput(riskOutEntry, fmtPrice(entry));
-  setRiskOutput(riskOutStopPrice, fmtPrice(stopPrice));
-  setRiskOutput(riskOutTpPrice, fmtPrice(takeProfitPrice));
-  setRiskOutput(riskOutSize, fmtNumber(size, 6));
-  setRiskOutput(riskOutNotional, `${fmtMoney(notional)} (x${fmtNumber(leverage, 0)} = ${fmtMoney(leveragedNotional)})`);
-  setRiskOutput(riskOutRr, `${fmtNumber(rr, 2)} : 1`);
-  setRiskOutput(riskOutPnl, fmtMoney(potentialPnl));
+  const tpTargets = [
+    {
+      label: "TP1",
+      pct: Math.max(Number(plannerTp1PercentInput.value) || 0, 0.01),
+      share: Math.max(Number(plannerTp1SizeInput.value) || 0, 0),
+    },
+    {
+      label: "TP2",
+      pct: Math.max(Number(plannerTp2PercentInput.value) || 0, 0.01),
+      share: Math.max(Number(plannerTp2SizeInput.value) || 0, 0),
+    },
+    {
+      label: "TP3",
+      pct: Math.max(Number(plannerTp3PercentInput.value) || 0, 0.01),
+      share: Math.max(Number(plannerTp3SizeInput.value) || 0, 0),
+    },
+  ];
+
+  let totalShare = tpTargets.reduce((sum, target) => sum + target.share, 0);
+  if (totalShare <= 0) {
+    tpTargets[1].share = 100;
+    totalShare = 100;
+  }
+
+  const tpBreakdown = tpTargets.map((target) => {
+    const shareFraction = totalShare > 0 ? target.share / totalShare : 0;
+    const qty = size * shareFraction;
+    const price = direction === "SHORT"
+      ? entry * (1 - target.pct / 100)
+      : entry * (1 + target.pct / 100);
+    const rewardPerUnit = direction === "SHORT" ? entry - price : price - entry;
+    const grossPnl = qty * rewardPerUnit;
+    const exitCost = qty * price * sideCostRate;
+    const entryCostShare = entryCost * shareFraction;
+    const netPnl = grossPnl - entryCostShare - exitCost;
+
+    return {
+      ...target,
+      shareFraction,
+      qty,
+      price,
+      rewardPerUnit,
+      grossPnl,
+      exitCost,
+      entryCostShare,
+      netPnl,
+    };
+  });
+
+  const weightedRewardPerUnit = tpBreakdown.reduce(
+    (sum, target) => sum + target.shareFraction * target.rewardPerUnit,
+    0,
+  );
+  const rr = riskPerUnit > 0 ? weightedRewardPerUnit / riskPerUnit : 0;
+  const totalExitCost = tpBreakdown.reduce((sum, target) => sum + target.exitCost, 0);
+  const estimatedFees = entryCost + totalExitCost;
+  const grossPnl = tpBreakdown.reduce((sum, target) => sum + target.grossPnl, 0);
+  const netPnl = grossPnl - estimatedFees;
+
+  let liquidationPrice = null;
+  if (leverage > 1) {
+    if (direction === "SHORT") {
+      liquidationPrice = entry * (1 + 1 / leverage);
+    } else {
+      liquidationPrice = entry * (1 - 1 / leverage);
+    }
+  }
+
+  const dailyLossLimit = Number(latestAutoTrade.daily_loss_limit_usdt);
+  const dailyPnl = Number(latestAutoTrade.daily_pnl_usdt);
+  let dailyRiskLeftText = "-";
+  let dailyRiskLeftValue = Number.NaN;
+  if (!Number.isNaN(dailyLossLimit) && !Number.isNaN(dailyPnl)) {
+    const riskUsed = Math.max(0, -dailyPnl);
+    const riskLeft = Math.max(0, dailyLossLimit - riskUsed);
+    dailyRiskLeftValue = riskLeft;
+    dailyRiskLeftText = `${fmtMoney(riskLeft)} left (limit ${fmtMoney(dailyLossLimit)})`;
+  }
+
+  const journalStats = getJournalExpectancyStats();
+  const manualWinRate = Number(plannerWinRateInput.value);
+  const manualAvgWin = Number(plannerAvgWinInput.value);
+  const manualAvgLoss = Number(plannerAvgLossInput.value);
+  const hasManualExpectancy = (
+    Number.isFinite(manualWinRate)
+    && Number.isFinite(manualAvgWin)
+    && Number.isFinite(manualAvgLoss)
+    && manualWinRate >= 0
+    && manualWinRate <= 100
+    && manualAvgWin >= 0
+    && manualAvgLoss >= 0
+    && (manualAvgWin > 0 || manualAvgLoss > 0)
+  );
+
+  let expectancyWinRate = Number.NaN;
+  let expectancyAvgWin = Number.NaN;
+  let expectancyAvgLoss = Number.NaN;
+  let expectancyInputsText = "No data";
+  if (hasManualExpectancy) {
+    expectancyWinRate = manualWinRate;
+    expectancyAvgWin = manualAvgWin;
+    expectancyAvgLoss = manualAvgLoss;
+    expectancyInputsText = (
+      `Manual • WR ${fmtNumber(expectancyWinRate, 1)}% `
+      + `• W ${fmtMoney(expectancyAvgWin)} • L ${fmtMoney(expectancyAvgLoss)}`
+    );
+  } else if (journalStats) {
+    expectancyWinRate = journalStats.winRatePct;
+    expectancyAvgWin = journalStats.avgWin;
+    expectancyAvgLoss = journalStats.avgLoss;
+    expectancyInputsText = (
+      `Auto journal (${journalStats.tradeCount} exits) • WR ${fmtNumber(expectancyWinRate, 1)}% `
+      + `• W ${fmtMoney(expectancyAvgWin)} • L ${fmtMoney(expectancyAvgLoss)}`
+    );
+  }
+
+  const expectancyUsdt = (
+    Number.isFinite(expectancyWinRate)
+    && Number.isFinite(expectancyAvgWin)
+    && Number.isFinite(expectancyAvgLoss)
+  )
+    ? ((expectancyWinRate / 100) * expectancyAvgWin) - ((1 - expectancyWinRate / 100) * expectancyAvgLoss)
+    : Number.NaN;
+  const expectancyR = (riskAmount > 0 && Number.isFinite(expectancyUsdt))
+    ? expectancyUsdt / riskAmount
+    : Number.NaN;
+
+  const [tp1, tp2, tp3] = tpBreakdown;
+  const formatTpLine = (target) => (
+    `${fmtPrice(target.price)} / ${fmtQty(target.qty)} / ${fmtMoney(target.netPnl)}`
+  );
+
+  setPlannerOutput(plannerOutDirection, direction);
+  setPlannerOutput(plannerOutEntrySource, `${entrySource} • ${fmtPrice(entry)}`);
+  setPlannerOutput(plannerOutRiskAmount, fmtMoney(riskAmount));
+  setPlannerOutput(plannerOutStopPrice, stopDistancePct > 0 ? fmtPrice(stopPrice) : "-");
+  setPlannerOutput(plannerOutTp1, formatTpLine(tp1));
+  setPlannerOutput(plannerOutTp2, formatTpLine(tp2));
+  setPlannerOutput(plannerOutTp3, formatTpLine(tp3));
+  setPlannerOutput(
+    plannerOutStopDistance,
+    stopDistancePct > 0 ? `${fmtNumber(stopDistancePct, 3)}%` : "ATR unavailable",
+  );
+  setPlannerOutput(plannerOutSize, fmtNumber(size, 6));
+  setPlannerOutput(plannerOutNotional, fmtMoney(notional));
+  setPlannerOutput(plannerOutMargin, fmtMoney(marginRequired));
+  setPlannerOutput(plannerOutLiqPrice, liquidationPrice == null ? "-" : fmtPrice(liquidationPrice));
+  setPlannerOutput(plannerOutFees, fmtMoney(estimatedFees));
+  setPlannerOutput(plannerOutNetPnl, fmtMoney(netPnl));
+  setPlannerOutput(plannerOutRr, `${fmtNumber(rr, 2)} : 1`);
+  setPlannerOutput(
+    plannerOutExpectancy,
+    Number.isFinite(expectancyUsdt)
+      ? `${fmtMoney(expectancyUsdt)} / trade (${fmtNumber(expectancyR, 2)}R)`
+      : "-",
+  );
+  setPlannerOutput(plannerOutExpectancyInputs, expectancyInputsText);
+  setPlannerOutput(plannerOutDailyRiskLeft, dailyRiskLeftText);
+  setPlannerOutput(
+    plannerOutAtr,
+    atrPct > 0 ? `${fmtNumber(atrPct, 3)}% (x${fmtNumber(atrMult, 2)})` : "ATR unavailable",
+  );
+
+  setPlannerTone(plannerOutNetPnl, netPnl);
+  setPlannerTone(plannerOutTp1, tp1.netPnl);
+  setPlannerTone(plannerOutTp2, tp2.netPnl);
+  setPlannerTone(plannerOutTp3, tp3.netPnl);
+  setPlannerTone(plannerOutExpectancy, expectancyUsdt);
+  plannerOutDailyRiskLeft.classList.remove("pos", "neg");
+  if (Number.isFinite(dailyRiskLeftValue)) {
+    if (dailyRiskLeftValue > 0) plannerOutDailyRiskLeft.classList.add("pos");
+    if (dailyRiskLeftValue <= 0) plannerOutDailyRiskLeft.classList.add("neg");
+  }
 }
 
 function formatAlertTime(timestamp) {
@@ -689,6 +987,7 @@ function renderAlerts() {
 
 function renderAutoTrade(payload) {
   const data = payload || {};
+  latestAutoTrade = data;
   const enabled = Boolean(data.enabled);
   const halted = Boolean(data.halted);
   const paper = Boolean(data.paper_trading);
@@ -900,6 +1199,8 @@ function renderAutoTrade(payload) {
         .join("");
     }
   }
+
+  updateTradePlanner();
 }
 
 function renderWallet(payload) {
@@ -1216,9 +1517,11 @@ timeframeButtons.forEach((button) => {
   });
 });
 
-[riskAccountInput, riskPercentInput, riskStopInput, riskTpInput, riskDirectionInput, riskLeverageInput].forEach((input) => {
-  input.addEventListener("input", updateRiskPanel);
-  input.addEventListener("change", updateRiskPanel);
+[plannerAccountInput, plannerRiskPercentInput, plannerEntryPriceInput, plannerStopModeInput, plannerStopPercentInput, plannerAtrMultInput, plannerTp1PercentInput, plannerTp1SizeInput, plannerTp2PercentInput, plannerTp2SizeInput, plannerTp3PercentInput, plannerTp3SizeInput, plannerDirectionInput, plannerLeverageInput, plannerFeeBpsInput, plannerSlippageBpsInput, plannerWinRateInput, plannerAvgWinInput, plannerAvgLossInput]
+  .filter(Boolean)
+  .forEach((input) => {
+  input.addEventListener("input", updateTradePlanner);
+  input.addEventListener("change", updateTradePlanner);
 });
 
 toggleSoundBtn.addEventListener("click", () => {
@@ -1276,7 +1579,7 @@ try {
   renderAlerts();
   renderAutoTrade({});
   renderWallet({});
-  updateRiskPanel();
+  updateTradePlanner();
   scheduleStaleCheck();
   connectWebSocket();
 } catch (error) {
