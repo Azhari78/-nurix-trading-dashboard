@@ -30,45 +30,20 @@ const priceChartContainer = document.getElementById("price-chart");
 const rsiChartContainer = document.getElementById("rsi-chart");
 const macdChartContainer = document.getElementById("macd-chart");
 
-const plannerAccountInput = document.getElementById("planner-account");
-const plannerRiskPercentInput = document.getElementById("planner-risk-percent");
-const plannerEntryPriceInput = document.getElementById("planner-entry-price");
-const plannerStopModeInput = document.getElementById("planner-stop-mode");
-const plannerStopPercentInput = document.getElementById("planner-stop-pct");
-const plannerAtrMultInput = document.getElementById("planner-atr-mult");
-const plannerTp1PercentInput = document.getElementById("planner-tp1-pct");
-const plannerTp1SizeInput = document.getElementById("planner-tp1-size");
-const plannerTp2PercentInput = document.getElementById("planner-tp2-pct");
-const plannerTp2SizeInput = document.getElementById("planner-tp2-size");
-const plannerTp3PercentInput = document.getElementById("planner-tp3-pct");
-const plannerTp3SizeInput = document.getElementById("planner-tp3-size");
-const plannerDirectionInput = document.getElementById("planner-direction");
-const plannerLeverageInput = document.getElementById("planner-leverage");
-const plannerFeeBpsInput = document.getElementById("planner-fee-bps");
-const plannerSlippageBpsInput = document.getElementById("planner-slippage-bps");
-const plannerWinRateInput = document.getElementById("planner-win-rate");
-const plannerAvgWinInput = document.getElementById("planner-avg-win");
-const plannerAvgLossInput = document.getElementById("planner-avg-loss");
-
-const plannerOutDirection = document.getElementById("planner-out-direction");
-const plannerOutEntrySource = document.getElementById("planner-out-entry-source");
-const plannerOutRiskAmount = document.getElementById("planner-out-risk-amount");
-const plannerOutStopPrice = document.getElementById("planner-out-stop-price");
-const plannerOutTp1 = document.getElementById("planner-out-tp1");
-const plannerOutTp2 = document.getElementById("planner-out-tp2");
-const plannerOutTp3 = document.getElementById("planner-out-tp3");
-const plannerOutStopDistance = document.getElementById("planner-out-stop-distance");
-const plannerOutSize = document.getElementById("planner-out-size");
-const plannerOutNotional = document.getElementById("planner-out-notional");
-const plannerOutMargin = document.getElementById("planner-out-margin");
-const plannerOutLiqPrice = document.getElementById("planner-out-liq-price");
-const plannerOutFees = document.getElementById("planner-out-fees");
-const plannerOutNetPnl = document.getElementById("planner-out-net-pnl");
-const plannerOutRr = document.getElementById("planner-out-rr");
-const plannerOutDailyRiskLeft = document.getElementById("planner-out-daily-risk-left");
-const plannerOutAtr = document.getElementById("planner-out-atr");
-const plannerOutExpectancy = document.getElementById("planner-out-expectancy");
-const plannerOutExpectancyInputs = document.getElementById("planner-out-expectancy-inputs");
+const execOutMarketState = document.getElementById("exec-out-market-state");
+const execOutAiGate = document.getElementById("exec-out-ai-gate");
+const execOutStrengthGate = document.getElementById("exec-out-strength-gate");
+const execOutVolumeGate = document.getElementById("exec-out-volume-gate");
+const execOutEmaGate = document.getElementById("exec-out-ema-gate");
+const execOutMacdGate = document.getElementById("exec-out-macd-gate");
+const execOutVolatilityGate = document.getElementById("exec-out-volatility-gate");
+const execOutLongReady = document.getElementById("exec-out-long-ready");
+const execOutShortReady = document.getElementById("exec-out-short-ready");
+const execOutPositionCap = document.getElementById("exec-out-position-cap");
+const execOutDailyRisk = document.getElementById("exec-out-daily-risk");
+const execOutHalt = document.getElementById("exec-out-halt");
+const execOutActivePosition = document.getElementById("exec-out-active-position");
+const execOutNextAction = document.getElementById("exec-out-next-action");
 
 const alertCountNode = document.getElementById("alert-count");
 const alertsListNode = document.getElementById("alerts-list");
@@ -309,7 +284,7 @@ function updateStats(summary) {
     statEma.textContent = "-";
     statSignal.textContent = "-";
     statStrength.textContent = "-";
-    updateTradePlanner();
+    updateExecutionPanel();
     return;
   }
 
@@ -342,7 +317,7 @@ function updateStats(summary) {
   if (strengthValue.includes("BUY")) statStrength.classList.add("pos");
   if (strengthValue.includes("SELL")) statStrength.classList.add("neg");
 
-  updateTradePlanner();
+  updateExecutionPanel();
 }
 
 function renderMoverList(container, rows, mode) {
@@ -592,17 +567,19 @@ function renderChart(chart) {
   macdChart.timeScale().fitContent();
 }
 
-function getPlannerDirection() {
-  const manual = plannerDirectionInput ? plannerDirectionInput.value : "long";
-  return manual === "short" ? "SHORT" : "LONG";
-}
-
-function setPlannerOutput(node, value) {
+function setExecutionOutput(node, value) {
   if (!node) return;
   node.textContent = value;
 }
 
-function setPlannerTone(node, numericValue) {
+function setExecutionGateTone(node, isPass) {
+  if (!node) return;
+  node.classList.remove("pos", "neg");
+  if (isPass === true) node.classList.add("pos");
+  if (isPass === false) node.classList.add("neg");
+}
+
+function setExecutionNumericTone(node, numericValue) {
   if (!node) return;
   node.classList.remove("pos", "neg");
   if (!Number.isFinite(numericValue)) return;
@@ -610,332 +587,299 @@ function setPlannerTone(node, numericValue) {
   if (numericValue < 0) node.classList.add("neg");
 }
 
-function getJournalExpectancyStats() {
-  const recentJournal = Array.isArray(latestAutoTrade.recent_journal)
-    ? latestAutoTrade.recent_journal
-    : [];
-  const realized = recentJournal.filter((row) => {
-    const eventType = String(row?.event_type || "").toUpperCase();
-    const pnl = Number(row?.pnl_usdt);
-    return (eventType === "EXIT" || eventType === "PARTIAL_EXIT") && Number.isFinite(pnl);
-  });
-
-  if (realized.length === 0) return null;
-
-  const wins = realized
-    .map((row) => Number(row.pnl_usdt))
-    .filter((pnl) => Number.isFinite(pnl) && pnl > 0);
-  const losses = realized
-    .map((row) => Number(row.pnl_usdt))
-    .filter((pnl) => Number.isFinite(pnl) && pnl < 0)
-    .map((pnl) => Math.abs(pnl));
-
-  const tradeCount = realized.length;
-  const winRatePct = tradeCount > 0 ? (wins.length / tradeCount) * 100 : 0;
-  const avgWin = wins.length > 0 ? wins.reduce((sum, value) => sum + value, 0) / wins.length : 0;
-  const avgLoss = losses.length > 0
-    ? losses.reduce((sum, value) => sum + value, 0) / losses.length
-    : 0;
-
-  return {
-    tradeCount,
-    winRatePct,
-    avgWin,
-    avgLoss,
-  };
-}
-
-function updateTradePlanner() {
+function updateExecutionPanel() {
   const requiredNodes = [
-    plannerAccountInput,
-    plannerRiskPercentInput,
-    plannerEntryPriceInput,
-    plannerStopModeInput,
-    plannerStopPercentInput,
-    plannerAtrMultInput,
-    plannerTp1PercentInput,
-    plannerTp1SizeInput,
-    plannerTp2PercentInput,
-    plannerTp2SizeInput,
-    plannerTp3PercentInput,
-    plannerTp3SizeInput,
-    plannerDirectionInput,
-    plannerLeverageInput,
-    plannerFeeBpsInput,
-    plannerSlippageBpsInput,
-    plannerWinRateInput,
-    plannerAvgWinInput,
-    plannerAvgLossInput,
-    plannerOutDirection,
-    plannerOutEntrySource,
-    plannerOutRiskAmount,
-    plannerOutStopPrice,
-    plannerOutTp1,
-    plannerOutTp2,
-    plannerOutTp3,
-    plannerOutStopDistance,
-    plannerOutSize,
-    plannerOutNotional,
-    plannerOutMargin,
-    plannerOutLiqPrice,
-    plannerOutFees,
-    plannerOutNetPnl,
-    plannerOutRr,
-    plannerOutDailyRiskLeft,
-    plannerOutAtr,
-    plannerOutExpectancy,
-    plannerOutExpectancyInputs,
+    execOutMarketState,
+    execOutAiGate,
+    execOutStrengthGate,
+    execOutVolumeGate,
+    execOutEmaGate,
+    execOutMacdGate,
+    execOutVolatilityGate,
+    execOutLongReady,
+    execOutShortReady,
+    execOutPositionCap,
+    execOutDailyRisk,
+    execOutHalt,
+    execOutActivePosition,
+    execOutNextAction,
   ];
   if (requiredNodes.some((node) => !node)) return;
 
-  const clearNodes = [
-    plannerOutDirection,
-    plannerOutEntrySource,
-    plannerOutRiskAmount,
-    plannerOutStopPrice,
-    plannerOutTp1,
-    plannerOutTp2,
-    plannerOutTp3,
-    plannerOutStopDistance,
-    plannerOutSize,
-    plannerOutNotional,
-    plannerOutMargin,
-    plannerOutLiqPrice,
-    plannerOutFees,
-    plannerOutNetPnl,
-    plannerOutRr,
-    plannerOutDailyRiskLeft,
-    plannerOutAtr,
-    plannerOutExpectancy,
-    plannerOutExpectancyInputs,
-  ];
-
-  const stopMode = String(plannerStopModeInput.value || "percent").toLowerCase();
-  if (stopMode === "atr") {
-    plannerStopPercentInput.disabled = true;
-    plannerAtrMultInput.disabled = false;
-  } else {
-    plannerStopPercentInput.disabled = false;
-    plannerAtrMultInput.disabled = true;
-  }
-
-  if (!currentSummary || currentSummary.price == null) {
-    clearNodes.forEach((node) => setPlannerOutput(node, "-"));
-    return;
-  }
-
-  const liveEntry = Number(currentSummary.price);
-  const manualEntry = Number(plannerEntryPriceInput.value);
-  const entry = manualEntry > 0 ? manualEntry : liveEntry;
-  const entrySource = manualEntry > 0 ? "Manual Entry" : "Live Price";
-
-  const account = Math.max(Number(plannerAccountInput.value) || 0, 0);
-  const riskPct = Math.max(Number(plannerRiskPercentInput.value) || 0, 0);
-  const leverage = Math.max(Number(plannerLeverageInput.value) || 1, 1);
-  const feeBps = Math.max(Number(plannerFeeBpsInput.value) || 0, 0);
-  const slippageBps = Math.max(Number(plannerSlippageBpsInput.value) || 0, 0);
-  const direction = getPlannerDirection();
-  const atrPct = Math.max(Number(currentSummary.atr_pct) || 0, 0);
-  const atrMult = Math.max(Number(plannerAtrMultInput.value) || 0, 0.1);
-  const stopPctManual = Math.max(Number(plannerStopPercentInput.value) || 0, 0.01);
-
-  const stopDistancePct = (
-    stopMode === "atr"
-      ? (atrPct > 0 ? atrPct * atrMult : 0)
-      : stopPctManual
-  );
-  const riskAmount = account * (riskPct / 100);
-
-  let stopPrice;
-  let riskPerUnit;
-
-  if (direction === "SHORT") {
-    stopPrice = entry * (1 + stopDistancePct / 100);
-    riskPerUnit = stopPrice - entry;
-  } else {
-    stopPrice = entry * (1 - stopDistancePct / 100);
-    riskPerUnit = entry - stopPrice;
-  }
-
-  const size = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
-  const notional = size * entry;
-  const marginRequired = leverage > 0 ? notional / leverage : 0;
-  const sideCostRate = (feeBps + slippageBps) / 10000;
-  const entryCost = notional * sideCostRate;
-
-  const tpTargets = [
-    {
-      label: "TP1",
-      pct: Math.max(Number(plannerTp1PercentInput.value) || 0, 0.01),
-      share: Math.max(Number(plannerTp1SizeInput.value) || 0, 0),
-    },
-    {
-      label: "TP2",
-      pct: Math.max(Number(plannerTp2PercentInput.value) || 0, 0.01),
-      share: Math.max(Number(plannerTp2SizeInput.value) || 0, 0),
-    },
-    {
-      label: "TP3",
-      pct: Math.max(Number(plannerTp3PercentInput.value) || 0, 0.01),
-      share: Math.max(Number(plannerTp3SizeInput.value) || 0, 0),
-    },
-  ];
-
-  let totalShare = tpTargets.reduce((sum, target) => sum + target.share, 0);
-  if (totalShare <= 0) {
-    tpTargets[1].share = 100;
-    totalShare = 100;
-  }
-
-  const tpBreakdown = tpTargets.map((target) => {
-    const shareFraction = totalShare > 0 ? target.share / totalShare : 0;
-    const qty = size * shareFraction;
-    const price = direction === "SHORT"
-      ? entry * (1 - target.pct / 100)
-      : entry * (1 + target.pct / 100);
-    const rewardPerUnit = direction === "SHORT" ? entry - price : price - entry;
-    const grossPnl = qty * rewardPerUnit;
-    const exitCost = qty * price * sideCostRate;
-    const entryCostShare = entryCost * shareFraction;
-    const netPnl = grossPnl - entryCostShare - exitCost;
-
-    return {
-      ...target,
-      shareFraction,
-      qty,
-      price,
-      rewardPerUnit,
-      grossPnl,
-      exitCost,
-      entryCostShare,
-      netPnl,
-    };
+  requiredNodes.forEach((node) => {
+    setExecutionOutput(node, "-");
+    node.classList.remove("pos", "neg");
   });
 
-  const weightedRewardPerUnit = tpBreakdown.reduce(
-    (sum, target) => sum + target.shareFraction * target.rewardPerUnit,
-    0,
-  );
-  const rr = riskPerUnit > 0 ? weightedRewardPerUnit / riskPerUnit : 0;
-  const totalExitCost = tpBreakdown.reduce((sum, target) => sum + target.exitCost, 0);
-  const estimatedFees = entryCost + totalExitCost;
-  const grossPnl = tpBreakdown.reduce((sum, target) => sum + target.grossPnl, 0);
-  const netPnl = grossPnl - estimatedFees;
+  if (!currentSummary) return;
 
-  let liquidationPrice = null;
-  if (leverage > 1) {
-    if (direction === "SHORT") {
-      liquidationPrice = entry * (1 + 1 / leverage);
+  const auto = latestAutoTrade || {};
+  const autoEnabled = Boolean(auto.enabled);
+  const halted = Boolean(auto.halted);
+  const strategyMode = String(auto.strategy_mode || "long_only");
+  const shortEnabled = Boolean(auto.short_enabled);
+  const allowLong = strategyMode !== "short_only";
+  const allowShort = shortEnabled && strategyMode !== "long_only";
+  const sessionBlocked = (
+    Boolean(auto.session_filter_enabled)
+    && String(auto.last_reason || "").toLowerCase().includes("session filter active")
+  );
+
+  const signal = String(currentSummary.signal || "HOLD").toUpperCase();
+  const rsi = Number(currentSummary.rsi);
+  const aiBias = String(currentSummary.ai_bias || "HOLD").toUpperCase();
+  const aiConfidence = Number(currentSummary.ai_confidence);
+  const aiScore = Number(currentSummary.ai_score);
+  const strengthConfidence = Number(currentSummary.strength_confidence);
+  const volumeRatio = Number(currentSummary.volume_ratio);
+  const ema20 = Number(currentSummary.ema20);
+  const ema50 = Number(currentSummary.ema50);
+  const macd = Number(currentSummary.macd);
+  const macdSignal = Number(currentSummary.macd_signal);
+  const atrPct = Number(currentSummary.atr_pct);
+  const change24h = Number(currentSummary.change_24h);
+  const livePrice = Number(currentSummary.price);
+
+  const minStrength = Number(auto.min_strength_confidence);
+  const minVolumeRatio = Number(auto.min_volume_ratio);
+  const aiFilterEnabled = Boolean(auto.ai_filter_enabled);
+  const adaptiveMinConf = Number(auto.adaptive_ai_min_confidence);
+  const fixedMinConf = Number(auto.ai_filter_min_confidence);
+  const minAiConfidence = (
+    Number.isFinite(adaptiveMinConf) && adaptiveMinConf > 0
+      ? adaptiveMinConf
+      : (Number.isFinite(fixedMinConf) ? fixedMinConf : 0)
+  );
+  const minAiScoreAbsRaw = Number(auto.ai_filter_min_score_abs);
+  const minAiScoreAbs = Number.isFinite(minAiScoreAbsRaw) ? minAiScoreAbsRaw : 0;
+  const emaConfirm = Boolean(auto.entry_confirm_ema_stack);
+  const macdConfirm = Boolean(auto.entry_confirm_macd);
+  const volBlockEnabled = Boolean(auto.extreme_volatility_block_enabled);
+  const maxAtrPct = Number(auto.max_atr_pct);
+  const maxAbsChangePct = Number(auto.max_abs_change_24h_pct);
+
+  const aiCommonPass = (
+    !aiFilterEnabled
+    || (
+      Number.isFinite(aiConfidence)
+      && aiConfidence >= minAiConfidence
+      && Math.abs(Number.isFinite(aiScore) ? aiScore : 0) >= minAiScoreAbs
+    )
+  );
+  const longAiPass = !aiFilterEnabled || (aiCommonPass && aiBias === "BUY");
+  const shortAiPass = !aiFilterEnabled || (aiCommonPass && aiBias === "SELL");
+
+  const strengthPass = (
+    !Number.isFinite(minStrength)
+    || minStrength <= 0
+    || (Number.isFinite(strengthConfidence) && strengthConfidence >= minStrength)
+  );
+  const volumePass = (
+    !Number.isFinite(minVolumeRatio)
+    || minVolumeRatio <= 0
+    || (Number.isFinite(volumeRatio) && volumeRatio >= minVolumeRatio)
+  );
+
+  const longEmaPass = !emaConfirm || (
+    Number.isFinite(ema20) && Number.isFinite(ema50) && ema20 > ema50
+  );
+  const shortEmaPass = !emaConfirm || (
+    Number.isFinite(ema20) && Number.isFinite(ema50) && ema20 < ema50
+  );
+  const longMacdPass = !macdConfirm || (
+    Number.isFinite(macd) && Number.isFinite(macdSignal) && macd >= macdSignal
+  );
+  const shortMacdPass = !macdConfirm || (
+    Number.isFinite(macd) && Number.isFinite(macdSignal) && macd <= macdSignal
+  );
+
+  const atrPass = (
+    !volBlockEnabled
+    || !Number.isFinite(maxAtrPct)
+    || maxAtrPct <= 0
+    || (Number.isFinite(atrPct) && atrPct <= maxAtrPct)
+  );
+  const changePass = (
+    !volBlockEnabled
+    || !Number.isFinite(maxAbsChangePct)
+    || maxAbsChangePct <= 0
+    || (Number.isFinite(change24h) && Math.abs(change24h) <= maxAbsChangePct)
+  );
+  const volatilityPass = atrPass && changePass;
+
+  const openPositions = Number(auto.open_positions || 0);
+  const maxOpenPositions = Number(auto.max_open_positions);
+  const positionCapPass = (
+    !Number.isFinite(maxOpenPositions)
+    || maxOpenPositions <= 0
+    || openPositions < maxOpenPositions
+  );
+
+  const dailyLossLimit = Number(auto.daily_loss_limit_usdt);
+  const dailyPnl = Number(auto.daily_pnl_usdt);
+  const riskUsed = Number.isFinite(dailyPnl) ? Math.max(0, -dailyPnl) : Number.NaN;
+  const riskLeft = (
+    Number.isFinite(dailyLossLimit) && Number.isFinite(riskUsed)
+      ? Math.max(0, dailyLossLimit - riskUsed)
+      : Number.NaN
+  );
+  const dailyRiskKnown = Number.isFinite(riskLeft);
+  const dailyRiskPass = !dailyRiskKnown || riskLeft > 0;
+
+  const baseReady = (
+    autoEnabled
+    && !halted
+    && !sessionBlocked
+    && positionCapPass
+    && strengthPass
+    && volumePass
+    && volatilityPass
+  );
+  const longReady = baseReady && allowLong && longAiPass && longEmaPass && longMacdPass;
+  const shortReady = baseReady && allowShort && shortAiPass && shortEmaPass && shortMacdPass;
+
+  const buildBlockedReasons = (side) => {
+    const reasons = [];
+    if (!autoEnabled) reasons.push("engine off");
+    if (halted) reasons.push("halted");
+    if (sessionBlocked) reasons.push("session");
+    if (!positionCapPass) reasons.push("position cap");
+    if (!strengthPass) reasons.push("strength");
+    if (!volumePass) reasons.push("volume");
+    if (!volatilityPass) reasons.push("volatility");
+    if (side === "LONG") {
+      if (!allowLong) reasons.push("mode");
+      if (!longAiPass) reasons.push("AI");
+      if (!longEmaPass) reasons.push("EMA");
+      if (!longMacdPass) reasons.push("MACD");
     } else {
-      liquidationPrice = entry * (1 - 1 / leverage);
+      if (!allowShort) reasons.push("mode");
+      if (!shortAiPass) reasons.push("AI");
+      if (!shortEmaPass) reasons.push("EMA");
+      if (!shortMacdPass) reasons.push("MACD");
     }
-  }
+    return reasons.slice(0, 4).join(", ");
+  };
 
-  const dailyLossLimit = Number(latestAutoTrade.daily_loss_limit_usdt);
-  const dailyPnl = Number(latestAutoTrade.daily_pnl_usdt);
-  let dailyRiskLeftText = "-";
-  let dailyRiskLeftValue = Number.NaN;
-  if (!Number.isNaN(dailyLossLimit) && !Number.isNaN(dailyPnl)) {
-    const riskUsed = Math.max(0, -dailyPnl);
-    const riskLeft = Math.max(0, dailyLossLimit - riskUsed);
-    dailyRiskLeftValue = riskLeft;
-    dailyRiskLeftText = `${fmtMoney(riskLeft)} left (limit ${fmtMoney(dailyLossLimit)})`;
-  }
-
-  const journalStats = getJournalExpectancyStats();
-  const manualWinRate = Number(plannerWinRateInput.value);
-  const manualAvgWin = Number(plannerAvgWinInput.value);
-  const manualAvgLoss = Number(plannerAvgLossInput.value);
-  const hasManualExpectancy = (
-    Number.isFinite(manualWinRate)
-    && Number.isFinite(manualAvgWin)
-    && Number.isFinite(manualAvgLoss)
-    && manualWinRate >= 0
-    && manualWinRate <= 100
-    && manualAvgWin >= 0
-    && manualAvgLoss >= 0
-    && (manualAvgWin > 0 || manualAvgLoss > 0)
-  );
-
-  let expectancyWinRate = Number.NaN;
-  let expectancyAvgWin = Number.NaN;
-  let expectancyAvgLoss = Number.NaN;
-  let expectancyInputsText = "No data";
-  if (hasManualExpectancy) {
-    expectancyWinRate = manualWinRate;
-    expectancyAvgWin = manualAvgWin;
-    expectancyAvgLoss = manualAvgLoss;
-    expectancyInputsText = (
-      `Manual • WR ${fmtNumber(expectancyWinRate, 1)}% `
-      + `• W ${fmtMoney(expectancyAvgWin)} • L ${fmtMoney(expectancyAvgLoss)}`
-    );
-  } else if (journalStats) {
-    expectancyWinRate = journalStats.winRatePct;
-    expectancyAvgWin = journalStats.avgWin;
-    expectancyAvgLoss = journalStats.avgLoss;
-    expectancyInputsText = (
-      `Auto journal (${journalStats.tradeCount} exits) • WR ${fmtNumber(expectancyWinRate, 1)}% `
-      + `• W ${fmtMoney(expectancyAvgWin)} • L ${fmtMoney(expectancyAvgLoss)}`
+  let activePositionText = "No open position on selected symbol";
+  let activePositionPnl = Number.NaN;
+  const selectedPosition = auto.selected_position && typeof auto.selected_position === "object"
+    ? auto.selected_position
+    : null;
+  if (selectedPosition) {
+    const positionSide = String(selectedPosition.side || "-").toUpperCase();
+    const entryPrice = Number(selectedPosition.entry_price);
+    const amount = Number(selectedPosition.amount);
+    if (
+      Number.isFinite(livePrice)
+      && Number.isFinite(entryPrice)
+      && Number.isFinite(amount)
+      && amount > 0
+      && (positionSide === "LONG" || positionSide === "SHORT")
+    ) {
+      activePositionPnl = positionSide === "SHORT"
+        ? (entryPrice - livePrice) * amount
+        : (livePrice - entryPrice) * amount;
+    }
+    const pnlText = Number.isFinite(activePositionPnl) ? fmtMoney(activePositionPnl) : "-";
+    activePositionText = (
+      `${positionSide} @ ${fmtPrice(entryPrice)} • qty ${fmtQty(amount)} • PnL ${pnlText}`
     );
   }
 
-  const expectancyUsdt = (
-    Number.isFinite(expectancyWinRate)
-    && Number.isFinite(expectancyAvgWin)
-    && Number.isFinite(expectancyAvgLoss)
-  )
-    ? ((expectancyWinRate / 100) * expectancyAvgWin) - ((1 - expectancyWinRate / 100) * expectancyAvgLoss)
-    : Number.NaN;
-  const expectancyR = (riskAmount > 0 && Number.isFinite(expectancyUsdt))
-    ? expectancyUsdt / riskAmount
-    : Number.NaN;
-
-  const [tp1, tp2, tp3] = tpBreakdown;
-  const formatTpLine = (target) => (
-    `${fmtPrice(target.price)} / ${fmtQty(target.qty)} / ${fmtMoney(target.netPnl)}`
+  const aiGateText = aiFilterEnabled
+    ? (
+      `LONG ${longAiPass ? "OK" : "BLOCK"} / SHORT ${shortAiPass ? "OK" : "BLOCK"} • `
+      + `bias ${aiBias} • conf ${fmtNumber(aiConfidence, 0)}% >= ${fmtNumber(minAiConfidence, 0)}% `
+      + `• |score| ${fmtNumber(Math.abs(Number.isFinite(aiScore) ? aiScore : 0), 2)} >= ${fmtNumber(minAiScoreAbs, 2)}`
+    )
+    : "OFF";
+  const strengthGateText = (
+    Number.isFinite(minStrength) && minStrength > 0
+      ? `${strengthPass ? "PASS" : "BLOCK"} • ${fmtNumber(strengthConfidence, 0)}% / min ${fmtNumber(minStrength, 0)}%`
+      : "OFF"
   );
-
-  setPlannerOutput(plannerOutDirection, direction);
-  setPlannerOutput(plannerOutEntrySource, `${entrySource} • ${fmtPrice(entry)}`);
-  setPlannerOutput(plannerOutRiskAmount, fmtMoney(riskAmount));
-  setPlannerOutput(plannerOutStopPrice, stopDistancePct > 0 ? fmtPrice(stopPrice) : "-");
-  setPlannerOutput(plannerOutTp1, formatTpLine(tp1));
-  setPlannerOutput(plannerOutTp2, formatTpLine(tp2));
-  setPlannerOutput(plannerOutTp3, formatTpLine(tp3));
-  setPlannerOutput(
-    plannerOutStopDistance,
-    stopDistancePct > 0 ? `${fmtNumber(stopDistancePct, 3)}%` : "ATR unavailable",
+  const volumeGateText = (
+    Number.isFinite(minVolumeRatio) && minVolumeRatio > 0
+      ? `${volumePass ? "PASS" : "BLOCK"} • ${fmtNumber(volumeRatio, 2)} / min ${fmtNumber(minVolumeRatio, 2)}`
+      : "OFF"
   );
-  setPlannerOutput(plannerOutSize, fmtNumber(size, 6));
-  setPlannerOutput(plannerOutNotional, fmtMoney(notional));
-  setPlannerOutput(plannerOutMargin, fmtMoney(marginRequired));
-  setPlannerOutput(plannerOutLiqPrice, liquidationPrice == null ? "-" : fmtPrice(liquidationPrice));
-  setPlannerOutput(plannerOutFees, fmtMoney(estimatedFees));
-  setPlannerOutput(plannerOutNetPnl, fmtMoney(netPnl));
-  setPlannerOutput(plannerOutRr, `${fmtNumber(rr, 2)} : 1`);
-  setPlannerOutput(
-    plannerOutExpectancy,
-    Number.isFinite(expectancyUsdt)
-      ? `${fmtMoney(expectancyUsdt)} / trade (${fmtNumber(expectancyR, 2)}R)`
+  const emaGateText = emaConfirm
+    ? `LONG ${longEmaPass ? "OK" : "BLOCK"} / SHORT ${shortEmaPass ? "OK" : "BLOCK"}`
+    : "OFF";
+  const macdGateText = macdConfirm
+    ? `LONG ${longMacdPass ? "OK" : "BLOCK"} / SHORT ${shortMacdPass ? "OK" : "BLOCK"}`
+    : "OFF";
+  const volatilityGateText = volBlockEnabled
+    ? (
+      `${volatilityPass ? "PASS" : "BLOCK"} • ATR ${fmtNumber(atrPct, 2)}% / ${fmtNumber(maxAtrPct, 2)}% `
+      + `• 24h ${fmtPercent(change24h)} / ±${fmtNumber(maxAbsChangePct, 2)}%`
+    )
+    : "OFF";
+
+  setExecutionOutput(
+    execOutMarketState,
+    `${signal} • RSI ${fmtNumber(rsi, 2)} • AI ${aiBias} (${fmtNumber(aiConfidence, 0)}%)`,
+  );
+  setExecutionOutput(execOutAiGate, aiGateText);
+  setExecutionOutput(execOutStrengthGate, strengthGateText);
+  setExecutionOutput(execOutVolumeGate, volumeGateText);
+  setExecutionOutput(execOutEmaGate, emaGateText);
+  setExecutionOutput(execOutMacdGate, macdGateText);
+  setExecutionOutput(execOutVolatilityGate, volatilityGateText);
+  setExecutionOutput(
+    execOutLongReady,
+    longReady ? "READY" : `BLOCKED • ${buildBlockedReasons("LONG") || "-"}`,
+  );
+  setExecutionOutput(
+    execOutShortReady,
+    shortReady ? "READY" : `BLOCKED • ${buildBlockedReasons("SHORT") || "-"}`,
+  );
+  setExecutionOutput(
+    execOutPositionCap,
+    `${positionCapPass ? "PASS" : "BLOCK"} • ${openPositions}/${fmtNumber(maxOpenPositions, 0)}`,
+  );
+  setExecutionOutput(
+    execOutDailyRisk,
+    Number.isFinite(riskLeft)
+      ? `${dailyRiskPass ? "PASS" : "BLOCK"} • left ${fmtMoney(riskLeft)} / ${fmtMoney(dailyLossLimit)}`
       : "-",
   );
-  setPlannerOutput(plannerOutExpectancyInputs, expectancyInputsText);
-  setPlannerOutput(plannerOutDailyRiskLeft, dailyRiskLeftText);
-  setPlannerOutput(
-    plannerOutAtr,
-    atrPct > 0 ? `${fmtNumber(atrPct, 3)}% (x${fmtNumber(atrMult, 2)})` : "ATR unavailable",
+  setExecutionOutput(
+    execOutHalt,
+    halted
+      ? `HALTED • ${String(auto.halt_reason || "Risk guard active")}`
+      : "RUNNING",
   );
+  setExecutionOutput(execOutActivePosition, activePositionText);
+  setExecutionOutput(execOutNextAction, String(auto.last_reason || "Waiting for market conditions"));
 
-  setPlannerTone(plannerOutNetPnl, netPnl);
-  setPlannerTone(plannerOutTp1, tp1.netPnl);
-  setPlannerTone(plannerOutTp2, tp2.netPnl);
-  setPlannerTone(plannerOutTp3, tp3.netPnl);
-  setPlannerTone(plannerOutExpectancy, expectancyUsdt);
-  plannerOutDailyRiskLeft.classList.remove("pos", "neg");
-  if (Number.isFinite(dailyRiskLeftValue)) {
-    if (dailyRiskLeftValue > 0) plannerOutDailyRiskLeft.classList.add("pos");
-    if (dailyRiskLeftValue <= 0) plannerOutDailyRiskLeft.classList.add("neg");
-  }
+  execOutMarketState.classList.remove("pos", "neg");
+  if (signal.includes("BUY")) execOutMarketState.classList.add("pos");
+  if (signal.includes("SELL")) execOutMarketState.classList.add("neg");
+
+  const aiGatePassForMode = (allowLong && longAiPass) || (allowShort && shortAiPass);
+  const emaGatePassForMode = (!allowLong || longEmaPass) && (!allowShort || shortEmaPass);
+  const macdGatePassForMode = (!allowLong || longMacdPass) && (!allowShort || shortMacdPass);
+
+  setExecutionGateTone(execOutAiGate, aiFilterEnabled ? aiGatePassForMode : null);
+  setExecutionGateTone(
+    execOutStrengthGate,
+    Number.isFinite(minStrength) && minStrength > 0 ? strengthPass : null,
+  );
+  setExecutionGateTone(
+    execOutVolumeGate,
+    Number.isFinite(minVolumeRatio) && minVolumeRatio > 0 ? volumePass : null,
+  );
+  setExecutionGateTone(execOutEmaGate, emaConfirm ? emaGatePassForMode : null);
+  setExecutionGateTone(execOutMacdGate, macdConfirm ? macdGatePassForMode : null);
+  setExecutionGateTone(execOutVolatilityGate, volBlockEnabled ? volatilityPass : null);
+  setExecutionGateTone(execOutLongReady, longReady);
+  setExecutionGateTone(execOutShortReady, shortReady);
+  setExecutionGateTone(execOutPositionCap, positionCapPass);
+  setExecutionGateTone(execOutDailyRisk, dailyRiskKnown ? dailyRiskPass : null);
+  setExecutionGateTone(execOutHalt, !halted);
+  setExecutionNumericTone(execOutActivePosition, activePositionPnl);
 }
 
 function formatAlertTime(timestamp) {
@@ -1200,7 +1144,7 @@ function renderAutoTrade(payload) {
     }
   }
 
-  updateTradePlanner();
+  updateExecutionPanel();
 }
 
 function renderWallet(payload) {
@@ -1517,13 +1461,6 @@ timeframeButtons.forEach((button) => {
   });
 });
 
-[plannerAccountInput, plannerRiskPercentInput, plannerEntryPriceInput, plannerStopModeInput, plannerStopPercentInput, plannerAtrMultInput, plannerTp1PercentInput, plannerTp1SizeInput, plannerTp2PercentInput, plannerTp2SizeInput, plannerTp3PercentInput, plannerTp3SizeInput, plannerDirectionInput, plannerLeverageInput, plannerFeeBpsInput, plannerSlippageBpsInput, plannerWinRateInput, plannerAvgWinInput, plannerAvgLossInput]
-  .filter(Boolean)
-  .forEach((input) => {
-  input.addEventListener("input", updateTradePlanner);
-  input.addEventListener("change", updateTradePlanner);
-});
-
 toggleSoundBtn.addEventListener("click", () => {
   soundEnabled = !soundEnabled;
   toggleSoundBtn.classList.toggle("active", soundEnabled);
@@ -1579,7 +1516,7 @@ try {
   renderAlerts();
   renderAutoTrade({});
   renderWallet({});
-  updateTradePlanner();
+  updateExecutionPanel();
   scheduleStaleCheck();
   connectWebSocket();
 } catch (error) {

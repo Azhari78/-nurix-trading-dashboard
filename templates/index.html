@@ -1004,112 +1004,22 @@
 
     <section class="tools-grid">
       <section class="panel">
-        <h3 class="tool-title">Trade Planner</h3>
-        <div class="risk-form">
-          <label class="field">
-            Account Size (USDT)
-            <input id="planner-account" type="number" min="1" step="1" value="10000" />
-          </label>
-          <label class="field">
-            Risk % Per Trade
-            <input id="planner-risk-percent" type="number" min="0.1" step="0.1" value="1.0" />
-          </label>
-          <label class="field">
-            Entry Price (Manual)
-            <input id="planner-entry-price" type="number" min="0" step="0.000001" value="" placeholder="Empty = live price" />
-          </label>
-          <label class="field">
-            Stop Mode
-            <select id="planner-stop-mode">
-              <option value="percent">Percent Stop</option>
-              <option value="atr">ATR Stop</option>
-            </select>
-          </label>
-          <label class="field">
-            Stop Loss %
-            <input id="planner-stop-pct" type="number" min="0.1" step="0.1" value="1.0" />
-          </label>
-          <label class="field">
-            ATR Multiplier
-            <input id="planner-atr-mult" type="number" min="0.1" step="0.1" value="1.5" />
-          </label>
-          <label class="field">
-            TP1 % (Partial)
-            <input id="planner-tp1-pct" type="number" min="0.1" step="0.1" value="1.0" />
-          </label>
-          <label class="field">
-            TP1 Size %
-            <input id="planner-tp1-size" type="number" min="0" step="1" value="40" />
-          </label>
-          <label class="field">
-            TP2 % (Partial)
-            <input id="planner-tp2-pct" type="number" min="0.1" step="0.1" value="2.0" />
-          </label>
-          <label class="field">
-            TP2 Size %
-            <input id="planner-tp2-size" type="number" min="0" step="1" value="35" />
-          </label>
-          <label class="field">
-            TP3 % (Runner)
-            <input id="planner-tp3-pct" type="number" min="0.1" step="0.1" value="3.0" />
-          </label>
-          <label class="field">
-            TP3 Size %
-            <input id="planner-tp3-size" type="number" min="0" step="1" value="25" />
-          </label>
-          <label class="field">
-            Direction
-            <select id="planner-direction">
-              <option value="long">Long</option>
-              <option value="short">Short</option>
-            </select>
-          </label>
-          <label class="field">
-            Leverage
-            <input id="planner-leverage" type="number" min="1" step="1" value="1" />
-          </label>
-          <label class="field">
-            Fee (bps per side)
-            <input id="planner-fee-bps" type="number" min="0" step="0.1" value="5" />
-          </label>
-          <label class="field">
-            Slippage (bps per side)
-            <input id="planner-slippage-bps" type="number" min="0" step="0.1" value="3" />
-          </label>
-          <label class="field">
-            Win Rate % (Manual)
-            <input id="planner-win-rate" type="number" min="0" max="100" step="1" value="" placeholder="Auto from journal" />
-          </label>
-          <label class="field">
-            Avg Win USDT (Manual)
-            <input id="planner-avg-win" type="number" min="0" step="0.01" value="" placeholder="Auto from journal" />
-          </label>
-          <label class="field">
-            Avg Loss USDT (Manual)
-            <input id="planner-avg-loss" type="number" min="0" step="0.01" value="" placeholder="Auto from journal" />
-          </label>
-        </div>
-
+        <h3 class="tool-title">Execution Checklist (Live)</h3>
         <div class="risk-results">
-          <article class="result-box"><span class="k">Direction</span><span class="v" id="planner-out-direction">-</span></article>
-          <article class="result-box"><span class="k">Entry Source</span><span class="v" id="planner-out-entry-source">-</span></article>
-          <article class="result-box"><span class="k">Risk Amount</span><span class="v" id="planner-out-risk-amount">-</span></article>
-          <article class="result-box"><span class="k">Stop Price</span><span class="v" id="planner-out-stop-price">-</span></article>
-          <article class="result-box"><span class="k">Stop Distance</span><span class="v" id="planner-out-stop-distance">-</span></article>
-          <article class="result-box"><span class="k">Position Size</span><span class="v" id="planner-out-size">-</span></article>
-          <article class="result-box"><span class="k">Position Notional</span><span class="v" id="planner-out-notional">-</span></article>
-          <article class="result-box"><span class="k">Margin Required</span><span class="v" id="planner-out-margin">-</span></article>
-          <article class="result-box"><span class="k">Liquidation Price (Approx)</span><span class="v" id="planner-out-liq-price">-</span></article>
-          <article class="result-box"><span class="k">TP1 (Price / Qty / Net)</span><span class="v" id="planner-out-tp1">-</span></article>
-          <article class="result-box"><span class="k">TP2 (Price / Qty / Net)</span><span class="v" id="planner-out-tp2">-</span></article>
-          <article class="result-box"><span class="k">TP3 (Price / Qty / Net)</span><span class="v" id="planner-out-tp3">-</span></article>
-          <article class="result-box"><span class="k">Est. Fees + Slippage (Plan)</span><span class="v" id="planner-out-fees">-</span></article>
-          <article class="result-box"><span class="k">Net PnL (TP Plan)</span><span class="v" id="planner-out-net-pnl">-</span></article>
-          <article class="result-box"><span class="k">R:R Ratio (Weighted)</span><span class="v" id="planner-out-rr">-</span></article>
-          <article class="result-box"><span class="k">Expectancy</span><span class="v" id="planner-out-expectancy">-</span></article>
-          <article class="result-box"><span class="k">Expectancy Inputs</span><span class="v" id="planner-out-expectancy-inputs">-</span></article>
-          <article class="result-box"><span class="k">Daily Risk Left</span><span class="v" id="planner-out-daily-risk-left">-</span></article>
-          <article class="result-box"><span class="k">Live ATR</span><span class="v" id="planner-out-atr">-</span></article>
+          <article class="result-box"><span class="k">Market State</span><span class="v" id="exec-out-market-state">-</span></article>
+          <article class="result-box"><span class="k">AI Gate</span><span class="v" id="exec-out-ai-gate">-</span></article>
+          <article class="result-box"><span class="k">Strength Gate</span><span class="v" id="exec-out-strength-gate">-</span></article>
+          <article class="result-box"><span class="k">Volume Gate</span><span class="v" id="exec-out-volume-gate">-</span></article>
+          <article class="result-box"><span class="k">EMA Gate</span><span class="v" id="exec-out-ema-gate">-</span></article>
+          <article class="result-box"><span class="k">MACD Gate</span><span class="v" id="exec-out-macd-gate">-</span></article>
+          <article class="result-box"><span class="k">Volatility Gate</span><span class="v" id="exec-out-volatility-gate">-</span></article>
+          <article class="result-box"><span class="k">Long Setup</span><span class="v" id="exec-out-long-ready">-</span></article>
+          <article class="result-box"><span class="k">Short Setup</span><span class="v" id="exec-out-short-ready">-</span></article>
+          <article class="result-box"><span class="k">Open Position Cap</span><span class="v" id="exec-out-position-cap">-</span></article>
+          <article class="result-box"><span class="k">Daily Risk Limit</span><span class="v" id="exec-out-daily-risk">-</span></article>
+          <article class="result-box"><span class="k">Engine Halt</span><span class="v" id="exec-out-halt">-</span></article>
+          <article class="result-box"><span class="k">Selected Position</span><span class="v" id="exec-out-active-position">-</span></article>
+          <article class="result-box"><span class="k">Next Engine Action</span><span class="v" id="exec-out-next-action">-</span></article>
         </div>
       </section>
 
