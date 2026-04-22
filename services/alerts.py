@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import urllib.parse
@@ -30,6 +31,7 @@ class AlertService:
         title: str,
         message: str,
         severity: str,
+        meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.state.alert_counter += 1
         event = {
@@ -40,6 +42,7 @@ class AlertService:
             "title": title,
             "message": message,
             "severity": severity,
+            "meta": meta or {},
         }
         self.state.alert_events.append(event)
         return event
@@ -60,6 +63,93 @@ class AlertService:
             return True
         return alert_type.startswith("auto_trade_")
 
+    @staticmethod
+    def _format_price(value: float) -> str:
+        if value <= 0:
+            return "-"
+        return f"{value:.6f}"
+
+    @staticmethod
+    def _format_qty(value: float) -> str:
+        if value <= 0:
+            return "-"
+        if value >= 1:
+            return f"{value:.4f}"
+        return f"{value:.8f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _derive_auto_trade_meta(alert: dict[str, Any]) -> dict[str, Any]:
+        meta = dict(alert.get("meta") or {})
+        title_upper = str(alert.get("title") or "").upper()
+        alert_type = str(alert.get("type") or "")
+
+        if "LONG" in title_upper and not meta.get("position_side"):
+            meta["position_side"] = "LONG"
+        if "SHORT" in title_upper and not meta.get("position_side"):
+            meta["position_side"] = "SHORT"
+
+        if "PARTIAL EXIT" in title_upper and not meta.get("event"):
+            meta["event"] = "PARTIAL_EXIT"
+        elif "ENTRY" in title_upper and not meta.get("event"):
+            meta["event"] = "ENTRY"
+        elif "EXIT" in title_upper and not meta.get("event"):
+            meta["event"] = "EXIT"
+
+        if not meta.get("event"):
+            if alert_type == "auto_trade_entry":
+                meta["event"] = "ENTRY"
+            elif alert_type == "auto_trade_partial_exit":
+                meta["event"] = "PARTIAL_EXIT"
+            elif alert_type == "auto_trade_exit":
+                meta["event"] = "EXIT"
+            elif alert_type == "auto_trade_error":
+                meta["event"] = "ERROR"
+            elif alert_type == "auto_trade_halt":
+                meta["event"] = "HALT"
+            elif alert_type == "auto_trade_kill_switch":
+                meta["event"] = "KILL_SWITCH"
+
+        event = str(meta.get("event") or "").upper()
+        position_side = str(meta.get("position_side") or "").upper()
+        if not meta.get("order_side"):
+            if event == "ENTRY":
+                if position_side == "LONG":
+                    meta["order_side"] = "BUY"
+                elif position_side == "SHORT":
+                    meta["order_side"] = "SELL"
+            elif event in {"EXIT", "PARTIAL_EXIT"}:
+                if position_side == "LONG":
+                    meta["order_side"] = "SELL"
+                elif position_side == "SHORT":
+                    meta["order_side"] = "BUY"
+
+        message = str(alert.get("message") or "")
+        if "price" not in meta:
+            entry_match = re.search(r"Entry\\s+([0-9]+(?:\\.[0-9]+)?)", message, re.IGNORECASE)
+            if entry_match:
+                with_value = entry_match.group(1)
+                try:
+                    meta["price"] = float(with_value)
+                except ValueError:
+                    pass
+        if "amount" not in meta:
+            qty_match = re.search(r"size\\s+([0-9]+(?:\\.[0-9]+)?)", message, re.IGNORECASE)
+            if qty_match:
+                with_value = qty_match.group(1)
+                try:
+                    meta["amount"] = float(with_value)
+                except ValueError:
+                    pass
+        if "pnl_usdt" not in meta:
+            pnl_match = re.search(r"PnL\\s+(-?[0-9]+(?:\\.[0-9]+)?)\\s*USDT", message, re.IGNORECASE)
+            if pnl_match:
+                with_value = pnl_match.group(1)
+                try:
+                    meta["pnl_usdt"] = float(with_value)
+                except ValueError:
+                    pass
+        return meta
+
     def _format_telegram_message(self, alert: dict[str, Any]) -> str:
         raw_timestamp = int(alert.get("timestamp") or 0)
         timestamp = datetime.fromtimestamp(raw_timestamp, tz=timezone.utc).strftime(
@@ -67,15 +157,79 @@ class AlertService:
         )
         symbol = str(alert.get("symbol") or "-")
         title = str(alert.get("title") or "Alert")
+        alert_type = str(alert.get("type") or "")
         message = str(alert.get("message") or "")
         severity = str(alert.get("severity") or "medium").upper()
+
+        if alert_type.startswith("auto_trade_"):
+            meta = self._derive_auto_trade_meta(alert)
+            event = str(meta.get("event") or "").upper()
+            position_side = str(meta.get("position_side") or "-").upper()
+            order_side = str(meta.get("order_side") or "-").upper()
+            mode = str(meta.get("mode") or "").upper()
+            reason = str(meta.get("reason") or "").strip()
+            price = safe_float(meta.get("price"))
+            amount = safe_float(meta.get("amount"))
+            pnl_usdt = safe_float(meta.get("pnl_usdt"))
+
+            event_label = {
+                "ENTRY": "ENTRY OPENED",
+                "EXIT": "EXIT CLOSED",
+                "PARTIAL_EXIT": "PARTIAL EXIT",
+                "ENTRY_FAILED": "ENTRY FAILED",
+                "EXIT_FAILED": "EXIT FAILED",
+                "ERROR": "ENGINE ERROR",
+                "HALT": "RISK HALT",
+                "KILL_SWITCH": "KILL SWITCH",
+            }.get(event, title.upper())
+
+            event_icon = {
+                "ENTRY": "🟢",
+                "EXIT": "🔵",
+                "PARTIAL_EXIT": "🟦",
+                "ENTRY_FAILED": "🟠",
+                "EXIT_FAILED": "🟠",
+                "ERROR": "🔴",
+                "HALT": "⛔",
+                "KILL_SWITCH": "🛑",
+            }.get(event, "📣")
+
+            order_icon = "🟢" if order_side == "BUY" else "🔴" if order_side == "SELL" else "⚪"
+
+            lines = [
+                f"{event_icon} Nurix Auto-Trade {event_label}",
+                f"• Pair: {symbol}",
+            ]
+            if position_side and position_side != "-":
+                lines.append(f"• Side: {position_side}")
+            if order_side and order_side != "-":
+                lines.append(f"• Order: {order_side} {order_icon}")
+            if mode:
+                lines.append(f"• Mode: {mode}")
+            if price is not None and price > 0:
+                lines.append(f"• Price: {self._format_price(price)}")
+            if amount is not None and amount > 0:
+                lines.append(f"• Qty: {self._format_qty(amount)}")
+            if pnl_usdt is not None:
+                lines.append(f"• PnL: {pnl_usdt:+.2f} USDT")
+            if reason:
+                lines.append(f"• Reason: {reason}")
+            include_info = bool(message)
+            if event in {"ENTRY", "EXIT", "PARTIAL_EXIT"}:
+                include_info = False
+            if include_info:
+                lines.append(f"• Info: {message}")
+            lines.append(f"• Severity: {severity}")
+            lines.append(f"• Time: {timestamp}")
+            return "\n".join(lines)
+
         return (
-            f"Nurix Alert\n"
-            f"Symbol: {symbol}\n"
-            f"Type: {title}\n"
-            f"Severity: {severity}\n"
-            f"Message: {message}\n"
-            f"Time: {timestamp}"
+            f"📣 Nurix Alert\n"
+            f"• Symbol: {symbol}\n"
+            f"• Type: {title}\n"
+            f"• Severity: {severity}\n"
+            f"• Message: {message}\n"
+            f"• Time: {timestamp}"
         )
 
     def _send_telegram_message(self, text: str) -> None:
@@ -174,7 +328,8 @@ class AlertService:
         title: str,
         message: str,
         severity: str,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         with self.state.alert_lock:
-            alert = self.create_alert(symbol, alert_type, title, message, severity)
+            alert = self.create_alert(symbol, alert_type, title, message, severity, meta=meta)
         self._send_telegram_async(alert)

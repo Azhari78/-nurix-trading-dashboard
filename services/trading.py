@@ -113,6 +113,10 @@ class TradingService:
                     title="Auto-trade symbol whitelist filtered",
                     message=f"Unsupported on exchange: {', '.join(invalid[:6])}",
                     severity="medium",
+                    meta={
+                        "event": "SYMBOL_FILTER",
+                        "reason": "Unsupported symbols removed",
+                    },
                 )
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Symbol whitelist validation skipped: %s", exc)
@@ -797,6 +801,16 @@ class TradingService:
                             title=f"{symbol} auto {position_side} PARTIAL EXIT",
                             message=f"Partial TP • PnL {realized_pnl:.2f} USDT",
                             severity="medium",
+                            meta={
+                                "event": "PARTIAL_EXIT",
+                                "position_side": position_side,
+                                "order_side": exit_side.upper(),
+                                "price": current_price,
+                                "amount": realized_amount,
+                                "pnl_usdt": realized_pnl,
+                                "reason": "PARTIAL TAKE PROFIT",
+                                "mode": str(partial_result.get("mode") or "live").upper(),
+                            },
                         )
                         status_reason = f"{symbol}: partial TP executed"
                         if position["amount"] <= 0:
@@ -830,6 +844,13 @@ class TradingService:
                         title=f"{symbol} auto-trade EXIT failed",
                         message=error_message[:140],
                         severity="high",
+                        meta={
+                            "event": "EXIT_FAILED",
+                            "position_side": position_side,
+                            "order_side": exit_side.upper(),
+                            "price": current_price,
+                            "amount": amount,
+                        },
                     )
                     continue
 
@@ -870,6 +891,16 @@ class TradingService:
                     title=f"{symbol} auto {position_side} EXIT executed",
                     message=f"{reason} • PnL {pnl_usdt:.2f} USDT",
                     severity=("medium" if pnl_usdt >= 0 else "high"),
+                    meta={
+                        "event": "EXIT",
+                        "position_side": position_side,
+                        "order_side": exit_side.upper(),
+                        "price": current_price,
+                        "amount": filled_amount,
+                        "pnl_usdt": pnl_usdt,
+                        "reason": reason,
+                        "mode": str(order_result.get("mode") or "live").upper(),
+                    },
                 )
 
                 if (
@@ -893,6 +924,12 @@ class TradingService:
                             f"after {self.state.auto_trade_consecutive_losses} losses"
                         ),
                         severity="high",
+                        meta={
+                            "event": "KILL_SWITCH",
+                            "reason": (
+                                f"{self.state.auto_trade_consecutive_losses} consecutive losses"
+                            ),
+                        },
                     )
 
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
@@ -910,6 +947,11 @@ class TradingService:
                             f"(limit -{self.settings.max_daily_loss_usdt:.2f})"
                         ),
                         severity="high",
+                        meta={
+                            "event": "HALT",
+                            "pnl_usdt": daily_pnl,
+                            "reason": "Daily risk limit hit",
+                        },
                     )
                 self.state.auto_trade_last_reason = (
                     f"Risk halt active: daily PnL {daily_pnl:.2f} USDT "
@@ -1026,6 +1068,13 @@ class TradingService:
                         title=f"{symbol} auto-trade ENTRY failed",
                         message=error_message[:140],
                         severity="high",
+                        meta={
+                            "event": "ENTRY_FAILED",
+                            "position_side": entry_side,
+                            "order_side": exchange_side.upper(),
+                            "price": current_price,
+                            "amount": amount,
+                        },
                     )
                     self._record_journal(
                         symbol=symbol,
@@ -1082,6 +1131,14 @@ class TradingService:
                     title=f"{symbol} auto {entry_side} ENTRY executed",
                     message=f"Entry {entry_price:.6f} • size {filled_amount:.6f}",
                     severity="medium",
+                    meta={
+                        "event": "ENTRY",
+                        "position_side": entry_side,
+                        "order_side": exchange_side.upper(),
+                        "price": entry_price,
+                        "amount": filled_amount,
+                        "mode": str(order_result.get("mode") or "live").upper(),
+                    },
                 )
                 self._record_journal(
                     symbol=symbol,
