@@ -49,6 +49,10 @@ class TradingService:
         return time.strftime("%Y-%m-%d", time.gmtime())
 
     @staticmethod
+    def utc_day_key_from_timestamp(ts: float) -> str:
+        return time.strftime("%Y-%m-%d", time.gmtime(ts))
+
+    @staticmethod
     def _clamp(value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
 
@@ -429,6 +433,88 @@ class TradingService:
             and row.get("pnl_usdt") is not None
         ]
 
+    def _realized_trades_for_day(self, day_key: str) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.state.auto_trade_journal
+            if row.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
+            and self.utc_day_key_from_timestamp(int(row.get("timestamp") or 0)) == day_key
+            and row.get("pnl_usdt") is not None
+        ]
+
+    def _maybe_send_daily_recap(self, now_ts: float, current_day_key: str) -> None:
+        recap_day = self.utc_day_key_from_timestamp(now_ts - 86400)
+        if self.state.auto_trade_last_daily_recap_day == recap_day:
+            return
+
+        realized = self._realized_trades_for_day(recap_day)
+        pnl_values = [safe_float(row.get("pnl_usdt")) or 0.0 for row in realized]
+        trade_count = len(pnl_values)
+        wins = sum(1 for pnl in pnl_values if pnl >= 0)
+        losses = trade_count - wins
+        win_rate_pct = ((wins / trade_count) * 100.0) if trade_count > 0 else 0.0
+        avg_win = (
+            sum(pnl for pnl in pnl_values if pnl > 0) / max(1, sum(1 for pnl in pnl_values if pnl > 0))
+        ) if trade_count > 0 else 0.0
+        avg_loss = (
+            abs(
+                sum(pnl for pnl in pnl_values if pnl < 0)
+                / max(1, sum(1 for pnl in pnl_values if pnl < 0))
+            )
+        ) if trade_count > 0 else 0.0
+
+        daily_pnl = safe_float(self.state.auto_trade_daily_pnl.get(recap_day))
+        if daily_pnl is None:
+            daily_pnl = sum(pnl_values)
+
+        pnl_by_symbol: dict[str, float] = {}
+        for row in realized:
+            symbol = str(row.get("symbol") or "-")
+            pnl_by_symbol[symbol] = pnl_by_symbol.get(symbol, 0.0) + (safe_float(row.get("pnl_usdt")) or 0.0)
+
+        if pnl_by_symbol:
+            top_symbol, top_symbol_pnl = max(pnl_by_symbol.items(), key=lambda item: item[1])
+        else:
+            top_symbol, top_symbol_pnl = "-", 0.0
+
+        halt_reason = str(self.state.auto_trade_halt_reason_by_day.get(recap_day) or "").strip()
+        halt_text = halt_reason if halt_reason else "None"
+
+        if trade_count <= 0 and abs(daily_pnl) < 1e-9 and halt_text == "None":
+            self.state.auto_trade_last_daily_recap_day = recap_day
+            return
+
+        message = (
+            f"UTC {recap_day} • PnL {daily_pnl:+.2f} USDT • Trades {trade_count} • "
+            f"Win {win_rate_pct:.1f}% ({wins}W/{losses}L) • "
+            f"Avg Win {avg_win:.2f} • Avg Loss {avg_loss:.2f} • "
+            f"Top {top_symbol} ({top_symbol_pnl:+.2f}) • Halt: {halt_text}"
+        )
+
+        self.alerts.emit_alert(
+            symbol=self.settings.default_symbol,
+            alert_type="auto_trade_daily_recap",
+            title=f"Auto-trade daily recap {recap_day}",
+            message=message,
+            severity="low",
+            meta={
+                "event": "DAILY_RECAP",
+                "day_key": recap_day,
+                "pnl_usdt": round(daily_pnl, 4),
+                "trades": trade_count,
+                "wins": wins,
+                "losses": losses,
+                "win_rate_pct": round(win_rate_pct, 2),
+                "avg_win_usdt": round(avg_win, 4),
+                "avg_loss_usdt": round(avg_loss, 4),
+                "top_symbol": top_symbol,
+                "top_symbol_pnl_usdt": round(top_symbol_pnl, 4),
+                "halt_reason": halt_text,
+                "generated_day_key": current_day_key,
+            },
+        )
+        self.state.auto_trade_last_daily_recap_day = recap_day
+
     def _compute_forward_guardrail(self, now_ts: float) -> tuple[float, str]:
         if not self.settings.auto_trade_forward_guardrail_enabled:
             self.state.auto_trade_guardrail_active = False
@@ -464,6 +550,9 @@ class TradingService:
             )
             self.state.auto_trade_halt_reason = (
                 f"Forward guardrail severe underperformance (win rate {win_rate:.0%})"
+            )
+            self.state.auto_trade_halt_reason_by_day[self.utc_day_key_from_timestamp(now_ts)] = (
+                str(self.state.auto_trade_halt_reason)
             )
 
         if underperform:
@@ -1161,6 +1250,13 @@ class TradingService:
 
             available_usdt = safe_float((wallet_payload or {}).get("usdt_free"))
             status_reason = "Waiting for valid trade setup"
+            day_key = self.utc_day_key()
+            if day_key not in self.state.auto_trade_daily_pnl:
+                self.state.auto_trade_daily_pnl[day_key] = 0.0
+            if self.state.auto_trade_halt_day and self.state.auto_trade_halt_day != day_key:
+                self.state.auto_trade_halt_day = None
+
+            self._maybe_send_daily_recap(now, day_key)
             if self.state.auto_trade_halt_until > now:
                 remaining = int(self.state.auto_trade_halt_until - now)
                 self.state.auto_trade_last_reason = (
@@ -1168,12 +1264,6 @@ class TradingService:
                     f"{self.state.auto_trade_halt_reason or 'cooldown risk pause'}"
                 )
                 return
-
-            day_key = self.utc_day_key()
-            if day_key not in self.state.auto_trade_daily_pnl:
-                self.state.auto_trade_daily_pnl[day_key] = 0.0
-            if self.state.auto_trade_halt_day and self.state.auto_trade_halt_day != day_key:
-                self.state.auto_trade_halt_day = None
 
             rows_by_symbol = {
                 str(row.get("symbol")): row for row in market_rows if row.get("symbol")
@@ -1406,6 +1496,9 @@ class TradingService:
                     self.state.auto_trade_halt_reason = (
                         f"Consecutive losses reached {self.state.auto_trade_consecutive_losses}"
                     )
+                    self.state.auto_trade_halt_reason_by_day[day_key] = str(
+                        self.state.auto_trade_halt_reason
+                    )
                     self.alerts.emit_alert(
                         symbol=symbol,
                         alert_type="auto_trade_kill_switch",
@@ -1439,6 +1532,9 @@ class TradingService:
             if risk_halted:
                 if self.state.auto_trade_halt_day != day_key:
                     self.state.auto_trade_halt_day = day_key
+                    self.state.auto_trade_halt_reason_by_day[day_key] = (
+                        f"Daily risk limit hit ({daily_pnl:.2f} USDT)"
+                    )
                     self.alerts.emit_alert(
                         symbol=self.settings.default_symbol,
                         alert_type="auto_trade_halt",
@@ -1796,7 +1892,9 @@ class TradingService:
                 "open_positions": len(self.state.auto_trade_positions),
                 "selected_position": position,
                 "recent_events": list(self.state.auto_trade_events)[-12:],
-                "recent_journal": list(self.state.auto_trade_journal)[-12:],
+                "recent_journal": list(self.state.auto_trade_journal)[-120:],
+                "journal_count": len(self.state.auto_trade_journal),
+                "daily_recap_last_day": self.state.auto_trade_last_daily_recap_day,
                 "stats_by_symbol": self.state.auto_trade_stats_by_symbol,
                 "copy_trade_enabled": self._copy_trade_is_enabled(),
                 "copy_trade_followers": [

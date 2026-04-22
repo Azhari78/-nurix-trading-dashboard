@@ -34,11 +34,13 @@ class RuntimeState:
         self.auto_trade_halt_day: str | None = None
         self.auto_trade_halt_until = 0.0
         self.auto_trade_halt_reason: str | None = None
+        self.auto_trade_halt_reason_by_day: dict[str, str] = {}
         self.auto_trade_consecutive_losses = 0
         self.auto_trade_last_risk_multiplier = 1.0
         self.auto_trade_guardrail_active = False
         self.auto_trade_guardrail_reason = ""
         self.auto_trade_last_reason = "Waiting for market conditions"
+        self.auto_trade_last_daily_recap_day: str | None = None
         self.auto_trade_adaptive_profile = "BALANCED"
         self.auto_trade_adaptive_reason = ""
         self.auto_trade_adaptive_ai_min_confidence = 0

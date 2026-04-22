@@ -743,6 +743,13 @@
       background: #081127;
     }
 
+    .table-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
     .wallet-grid {
       display: grid;
       gap: 10px;
@@ -1040,6 +1047,24 @@
     </section>
 
     <section class="panel">
+      <h3 class="tool-title">Gate Fail Analytics (Live)</h3>
+      <div class="risk-results">
+        <article class="result-box"><span class="k">Tracked Symbols</span><span class="v" id="gate-out-tracked">-</span></article>
+        <article class="result-box"><span class="k">Blocked Symbols</span><span class="v" id="gate-out-blocked">-</span></article>
+        <article class="result-box"><span class="k">Long Ready</span><span class="v" id="gate-out-ready-long">-</span></article>
+        <article class="result-box"><span class="k">Short Ready</span><span class="v" id="gate-out-ready-short">-</span></article>
+        <article class="result-box"><span class="k">AI Blocks</span><span class="v" id="gate-out-ai">-</span></article>
+        <article class="result-box"><span class="k">Strength Blocks</span><span class="v" id="gate-out-strength">-</span></article>
+        <article class="result-box"><span class="k">Volume Blocks</span><span class="v" id="gate-out-volume">-</span></article>
+        <article class="result-box"><span class="k">EMA Blocks</span><span class="v" id="gate-out-ema">-</span></article>
+        <article class="result-box"><span class="k">MACD Blocks</span><span class="v" id="gate-out-macd">-</span></article>
+        <article class="result-box"><span class="k">RSI Blocks</span><span class="v" id="gate-out-rsi">-</span></article>
+        <article class="result-box"><span class="k">Volatility Blocks</span><span class="v" id="gate-out-volatility">-</span></article>
+        <article class="result-box"><span class="k">Top Blocked Symbols</span><span class="v" id="gate-out-top-blocked">-</span></article>
+      </div>
+    </section>
+
+    <section class="panel">
       <h3 class="tool-title">Wallet (Spot)</h3>
       <div class="orderflow-error" id="wallet-error">Wallet data unavailable.</div>
       <div class="wallet-grid">
@@ -1114,6 +1139,29 @@
           </thead>
           <tbody id="copy-trade-events">
             <tr><td colspan="5" class="mini-empty">No copy-trade events yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-actions">
+        <button id="export-journal-csv" class="toggle-btn" type="button">Export Journal CSV</button>
+      </div>
+      <div class="auto-table-wrap">
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Symbol</th>
+              <th>Event</th>
+              <th>Side</th>
+              <th>Price</th>
+              <th>Qty</th>
+              <th>Notional</th>
+              <th>PnL</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="trade-journal-body">
+            <tr><td colspan="9" class="mini-empty">No journal entries yet.</td></tr>
           </tbody>
         </table>
       </div>

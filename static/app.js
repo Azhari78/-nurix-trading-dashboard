@@ -44,6 +44,18 @@ const execOutDailyRisk = document.getElementById("exec-out-daily-risk");
 const execOutHalt = document.getElementById("exec-out-halt");
 const execOutActivePosition = document.getElementById("exec-out-active-position");
 const execOutNextAction = document.getElementById("exec-out-next-action");
+const gateOutTracked = document.getElementById("gate-out-tracked");
+const gateOutBlocked = document.getElementById("gate-out-blocked");
+const gateOutReadyLong = document.getElementById("gate-out-ready-long");
+const gateOutReadyShort = document.getElementById("gate-out-ready-short");
+const gateOutAi = document.getElementById("gate-out-ai");
+const gateOutStrength = document.getElementById("gate-out-strength");
+const gateOutVolume = document.getElementById("gate-out-volume");
+const gateOutEma = document.getElementById("gate-out-ema");
+const gateOutMacd = document.getElementById("gate-out-macd");
+const gateOutRsi = document.getElementById("gate-out-rsi");
+const gateOutVolatility = document.getElementById("gate-out-volatility");
+const gateOutTopBlocked = document.getElementById("gate-out-top-blocked");
 
 const alertCountNode = document.getElementById("alert-count");
 const alertsListNode = document.getElementById("alerts-list");
@@ -62,6 +74,8 @@ const autoTradeAdaptiveNode = document.getElementById("auto-trade-adaptive");
 const autoTradeCopyNode = document.getElementById("auto-trade-copy");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
 const copyTradeEventsNode = document.getElementById("copy-trade-events");
+const tradeJournalBody = document.getElementById("trade-journal-body");
+const exportJournalCsvBtn = document.getElementById("export-journal-csv");
 
 const walletStatusNode = document.getElementById("wallet-status");
 const walletExchangeNode = document.getElementById("wallet-exchange");
@@ -882,6 +896,328 @@ function updateExecutionPanel() {
   setExecutionNumericTone(execOutActivePosition, activePositionPnl);
 }
 
+function updateGateFailAnalytics() {
+  const requiredNodes = [
+    gateOutTracked,
+    gateOutBlocked,
+    gateOutReadyLong,
+    gateOutReadyShort,
+    gateOutAi,
+    gateOutStrength,
+    gateOutVolume,
+    gateOutEma,
+    gateOutMacd,
+    gateOutRsi,
+    gateOutVolatility,
+    gateOutTopBlocked,
+  ];
+  if (requiredNodes.some((node) => !node)) return;
+
+  requiredNodes.forEach((node) => {
+    node.textContent = "-";
+    node.classList.remove("pos", "neg");
+  });
+
+  const auto = latestAutoTrade || {};
+  const trackedSymbols = Array.isArray(auto.symbols) ? auto.symbols : [];
+  const trackedSet = new Set(trackedSymbols);
+  const scopedRows = marketRows.filter((row) => {
+    const symbol = String(row?.symbol || "");
+    return symbol && trackedSet.has(symbol) && !row?.error;
+  });
+
+  const trackedCount = scopedRows.length;
+  const openPositions = Number(auto.open_positions || 0);
+  const maxOpenPositions = Number(auto.max_open_positions);
+  const positionCapPass = (
+    !Number.isFinite(maxOpenPositions)
+    || maxOpenPositions <= 0
+    || openPositions < maxOpenPositions
+  );
+
+  const autoEnabled = Boolean(auto.enabled);
+  const halted = Boolean(auto.halted);
+  const strategyMode = String(auto.strategy_mode || "long_only");
+  const shortEnabled = Boolean(auto.short_enabled);
+  const allowLong = strategyMode !== "short_only";
+  const allowShort = shortEnabled && strategyMode !== "long_only";
+  const sessionBlocked = (
+    Boolean(auto.session_filter_enabled)
+    && String(auto.last_reason || "").toLowerCase().includes("session filter active")
+  );
+  const baseGlobalPass = autoEnabled && !halted && !sessionBlocked && positionCapPass;
+
+  const minStrength = Number(auto.min_strength_confidence);
+  const minVolumeRatio = Number(auto.min_volume_ratio);
+  const aiFilterEnabled = Boolean(auto.ai_filter_enabled);
+  const adaptiveMinConf = Number(auto.adaptive_ai_min_confidence);
+  const fixedMinConf = Number(auto.ai_filter_min_confidence);
+  const minAiConfidence = (
+    Number.isFinite(adaptiveMinConf) && adaptiveMinConf > 0
+      ? adaptiveMinConf
+      : (Number.isFinite(fixedMinConf) ? fixedMinConf : 0)
+  );
+  const minAiScoreAbsRaw = Number(auto.ai_filter_min_score_abs);
+  const minAiScoreAbs = Number.isFinite(minAiScoreAbsRaw) ? minAiScoreAbsRaw : 0;
+  const emaConfirm = Boolean(auto.entry_confirm_ema_stack);
+  const macdConfirm = Boolean(auto.entry_confirm_macd);
+  const volBlockEnabled = Boolean(auto.extreme_volatility_block_enabled);
+  const maxAtrPct = Number(auto.max_atr_pct);
+  const maxAbsChangePct = Number(auto.max_abs_change_24h_pct);
+  const longRsiMin = Number(auto.long_rsi_min);
+  const longRsiMax = Number(auto.long_rsi_max);
+  const shortRsiMin = Number(auto.short_rsi_min);
+  const shortRsiMax = Number(auto.short_rsi_max);
+
+  let blockedCount = 0;
+  let longReadyCount = 0;
+  let shortReadyCount = 0;
+  const failCounts = {
+    ai: 0,
+    strength: 0,
+    volume: 0,
+    ema: 0,
+    macd: 0,
+    rsi: 0,
+    volatility: 0,
+  };
+  const blockedSymbols = [];
+
+  scopedRows.forEach((row) => {
+    const symbol = String(row.symbol || "-");
+    const rsi = Number(row.rsi);
+    const aiBias = String(row.ai_bias || "HOLD").toUpperCase();
+    const aiConfidence = Number(row.ai_confidence);
+    const aiScore = Number(row.ai_score);
+    const strengthConfidence = Number(row.strength_confidence);
+    const volumeRatio = Number(row.volume_ratio);
+    const ema20 = Number(row.ema20);
+    const ema50 = Number(row.ema50);
+    const macd = Number(row.macd);
+    const macdSignal = Number(row.macd_signal);
+    const atrPct = Number(row.atr_pct);
+    const change24h = Number(row.change_24h);
+    const price = Number(row.price);
+
+    const aiCommonPass = (
+      !aiFilterEnabled
+      || (
+        Number.isFinite(aiConfidence)
+        && aiConfidence >= minAiConfidence
+        && Math.abs(Number.isFinite(aiScore) ? aiScore : 0) >= minAiScoreAbs
+      )
+    );
+    const longAiPass = !aiFilterEnabled || (aiCommonPass && aiBias === "BUY");
+    const shortAiPass = !aiFilterEnabled || (aiCommonPass && aiBias === "SELL");
+
+    const strengthPass = (
+      !Number.isFinite(minStrength)
+      || minStrength <= 0
+      || (Number.isFinite(strengthConfidence) && strengthConfidence >= minStrength)
+    );
+    const volumePass = (
+      !Number.isFinite(minVolumeRatio)
+      || minVolumeRatio <= 0
+      || (Number.isFinite(volumeRatio) && volumeRatio >= minVolumeRatio)
+    );
+
+    const longEmaPass = (
+      Number.isFinite(price)
+      && Number.isFinite(ema20)
+      && Number.isFinite(ema50)
+      && price > ema50
+      && (!emaConfirm || ema20 > ema50)
+    );
+    const shortEmaPass = (
+      Number.isFinite(price)
+      && Number.isFinite(ema20)
+      && Number.isFinite(ema50)
+      && price < ema50
+      && (!emaConfirm || ema20 < ema50)
+    );
+    const longMacdPass = !macdConfirm || (
+      Number.isFinite(macd) && Number.isFinite(macdSignal) && macd >= macdSignal
+    );
+    const shortMacdPass = !macdConfirm || (
+      Number.isFinite(macd) && Number.isFinite(macdSignal) && macd <= macdSignal
+    );
+    const longRsiPass = (
+      Number.isFinite(rsi)
+      && Number.isFinite(longRsiMin)
+      && Number.isFinite(longRsiMax)
+      && rsi >= longRsiMin
+      && rsi <= longRsiMax
+    );
+    const shortRsiPass = (
+      Number.isFinite(rsi)
+      && Number.isFinite(shortRsiMin)
+      && Number.isFinite(shortRsiMax)
+      && rsi >= shortRsiMin
+      && rsi <= shortRsiMax
+    );
+
+    const atrPass = (
+      !volBlockEnabled
+      || !Number.isFinite(maxAtrPct)
+      || maxAtrPct <= 0
+      || (Number.isFinite(atrPct) && atrPct <= maxAtrPct)
+    );
+    const changePass = (
+      !volBlockEnabled
+      || !Number.isFinite(maxAbsChangePct)
+      || maxAbsChangePct <= 0
+      || (Number.isFinite(change24h) && Math.abs(change24h) <= maxAbsChangePct)
+    );
+    const volatilityPass = atrPass && changePass;
+
+    const longReady = (
+      allowLong
+      && baseGlobalPass
+      && strengthPass
+      && volumePass
+      && volatilityPass
+      && longAiPass
+      && longEmaPass
+      && longMacdPass
+      && longRsiPass
+    );
+    const shortReady = (
+      allowShort
+      && baseGlobalPass
+      && strengthPass
+      && volumePass
+      && volatilityPass
+      && shortAiPass
+      && shortEmaPass
+      && shortMacdPass
+      && shortRsiPass
+    );
+
+    if (longReady) longReadyCount += 1;
+    if (shortReady) shortReadyCount += 1;
+
+    if (longReady || shortReady) return;
+
+    blockedCount += 1;
+    const tags = [];
+
+    const aiBlockedForMode = (
+      (allowLong && !longAiPass) || (allowShort && !shortAiPass)
+    );
+    const emaBlockedForMode = (
+      (allowLong && !longEmaPass) || (allowShort && !shortEmaPass)
+    );
+    const macdBlockedForMode = (
+      (allowLong && !longMacdPass) || (allowShort && !shortMacdPass)
+    );
+    const rsiBlockedForMode = (
+      (allowLong && !longRsiPass) || (allowShort && !shortRsiPass)
+    );
+
+    if (aiBlockedForMode) {
+      failCounts.ai += 1;
+      tags.push("AI");
+    }
+    if (!strengthPass) {
+      failCounts.strength += 1;
+      tags.push("STR");
+    }
+    if (!volumePass) {
+      failCounts.volume += 1;
+      tags.push("VOL");
+    }
+    if (emaBlockedForMode) {
+      failCounts.ema += 1;
+      tags.push("EMA");
+    }
+    if (macdBlockedForMode) {
+      failCounts.macd += 1;
+      tags.push("MACD");
+    }
+    if (rsiBlockedForMode) {
+      failCounts.rsi += 1;
+      tags.push("RSI");
+    }
+    if (!volatilityPass) {
+      failCounts.volatility += 1;
+      tags.push("ATR/24H");
+    }
+
+    if (tags.length > 0) {
+      blockedSymbols.push(`${symbol}(${tags.join("/")})`);
+    } else {
+      blockedSymbols.push(`${symbol}(GLOBAL)`);
+    }
+  });
+
+  setExecutionOutput(gateOutTracked, String(trackedCount));
+  setExecutionOutput(gateOutBlocked, String(blockedCount));
+  setExecutionOutput(gateOutReadyLong, String(longReadyCount));
+  setExecutionOutput(gateOutReadyShort, String(shortReadyCount));
+  setExecutionOutput(gateOutAi, String(failCounts.ai));
+  setExecutionOutput(gateOutStrength, String(failCounts.strength));
+  setExecutionOutput(gateOutVolume, String(failCounts.volume));
+  setExecutionOutput(gateOutEma, String(failCounts.ema));
+  setExecutionOutput(gateOutMacd, String(failCounts.macd));
+  setExecutionOutput(gateOutRsi, String(failCounts.rsi));
+  setExecutionOutput(gateOutVolatility, String(failCounts.volatility));
+  setExecutionOutput(
+    gateOutTopBlocked,
+    blockedSymbols.length > 0 ? blockedSymbols.slice(0, 6).join(", ") : "No blocked symbols",
+  );
+
+  setExecutionGateTone(gateOutBlocked, blockedCount === 0);
+  setExecutionGateTone(gateOutReadyLong, longReadyCount > 0);
+  setExecutionGateTone(gateOutReadyShort, shortReadyCount > 0);
+  setExecutionGateTone(gateOutAi, failCounts.ai === 0);
+  setExecutionGateTone(gateOutStrength, failCounts.strength === 0);
+  setExecutionGateTone(gateOutVolume, failCounts.volume === 0);
+  setExecutionGateTone(gateOutEma, failCounts.ema === 0);
+  setExecutionGateTone(gateOutMacd, failCounts.macd === 0);
+  setExecutionGateTone(gateOutRsi, failCounts.rsi === 0);
+  setExecutionGateTone(gateOutVolatility, failCounts.volatility === 0);
+}
+
+function renderTradeJournalRows(entries) {
+  if (!tradeJournalBody) return;
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    tradeJournalBody.innerHTML =
+      `<tr><td colspan="9" class="mini-empty">No journal entries yet.</td></tr>`;
+    return;
+  }
+
+  tradeJournalBody.innerHTML = [...entries]
+    .reverse()
+    .slice(0, 120)
+    .map((entry) => {
+      const ts = formatAlertTime(entry.timestamp);
+      const symbol = escapeHtml(entry.symbol || "-");
+      const eventType = escapeHtml(entry.event_type || "-");
+      const side = escapeHtml(String(entry.side || "-").toUpperCase());
+      const price = fmtPrice(entry.price);
+      const qty = fmtQty(entry.amount);
+      const notional = entry.notional_usdt == null ? "-" : fmtMoney(entry.notional_usdt);
+      const pnl = entry.pnl_usdt == null ? "-" : `${fmtNumber(entry.pnl_usdt, 2)} USDT`;
+      const reason = escapeHtml(entry.reason || "-");
+
+      return `
+        <tr>
+          <td>${ts}</td>
+          <td>${symbol}</td>
+          <td>${eventType}</td>
+          <td>${side}</td>
+          <td>${price}</td>
+          <td>${qty}</td>
+          <td>${notional}</td>
+          <td>${pnl}</td>
+          <td>${reason}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
 function formatAlertTime(timestamp) {
   if (!timestamp) return "--:--:--";
   return new Date(Number(timestamp) * 1000).toLocaleTimeString();
@@ -958,6 +1294,7 @@ function renderAutoTrade(payload) {
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
+  const recentJournal = Array.isArray(data.recent_journal) ? data.recent_journal : [];
   const lastReason = String(data.last_reason || "-");
   const adaptiveEnabled = Boolean(data.adaptive_enabled);
   const adaptiveProfile = String(data.adaptive_profile || "BALANCED");
@@ -1144,7 +1481,9 @@ function renderAutoTrade(payload) {
     }
   }
 
+  renderTradeJournalRows(recentJournal);
   updateExecutionPanel();
+  updateGateFailAnalytics();
 }
 
 function renderWallet(payload) {
@@ -1510,6 +1849,13 @@ clearAlertsBtn.addEventListener("click", () => {
   );
   renderAlerts();
 });
+
+if (exportJournalCsvBtn) {
+  exportJournalCsvBtn.addEventListener("click", () => {
+    const url = "/api/trade-journal.csv?limit=2000";
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
+}
 
 try {
   initCharts();

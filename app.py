@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -89,6 +93,56 @@ def health() -> dict[str, Any]:
         "auto_trade_symbol_count": len(settings.auto_trade_symbols),
         "stream_connected": bool(market_state.get_stream_status().get("connected")),
     }
+
+
+@app.get("/api/trade-journal.csv")
+def trade_journal_csv(limit: int = 1000) -> Response:
+    safe_limit = max(1, min(int(limit), 5000))
+    with state.auto_trade_lock:
+        journal_rows = list(state.auto_trade_journal)[-safe_limit:]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "timestamp_utc",
+            "symbol",
+            "event_type",
+            "side",
+            "reason",
+            "pnl_usdt",
+            "pnl_pct",
+            "notional_usdt",
+            "price",
+            "amount",
+            "metadata",
+        ]
+    )
+
+    for row in reversed(journal_rows):
+        ts = int(row.get("timestamp") or 0)
+        ts_text = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        metadata = row.get("metadata") or {}
+        writer.writerow(
+            [
+                ts_text,
+                str(row.get("symbol") or ""),
+                str(row.get("event_type") or ""),
+                str(row.get("side") or ""),
+                str(row.get("reason") or ""),
+                row.get("pnl_usdt"),
+                row.get("pnl_pct"),
+                row.get("notional_usdt"),
+                row.get("price"),
+                row.get("amount"),
+                json.dumps(metadata, ensure_ascii=True),
+            ]
+        )
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    filename = f"trade_journal_{timestamp}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @app.websocket("/ws")

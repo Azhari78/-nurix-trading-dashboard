@@ -108,6 +108,8 @@ class AlertService:
                 meta["event"] = "HALT"
             elif alert_type == "auto_trade_kill_switch":
                 meta["event"] = "KILL_SWITCH"
+            elif alert_type == "auto_trade_daily_recap":
+                meta["event"] = "DAILY_RECAP"
 
         event = str(meta.get("event") or "").upper()
         position_side = str(meta.get("position_side") or "").upper()
@@ -181,6 +183,7 @@ class AlertService:
                 "ERROR": "ENGINE ERROR",
                 "HALT": "RISK HALT",
                 "KILL_SWITCH": "KILL SWITCH",
+                "DAILY_RECAP": "DAILY RECAP",
             }.get(event, title.upper())
 
             event_icon = {
@@ -192,6 +195,7 @@ class AlertService:
                 "ERROR": "🔴",
                 "HALT": "⛔",
                 "KILL_SWITCH": "🛑",
+                "DAILY_RECAP": "📊",
             }.get(event, "📣")
 
             order_icon = "🟢" if order_side == "BUY" else "🔴" if order_side == "SELL" else "⚪"
@@ -214,6 +218,26 @@ class AlertService:
                 lines.append(f"• PnL: {pnl_usdt:+.2f} USDT")
             if reason:
                 lines.append(f"• Reason: {reason}")
+            if event == "DAILY_RECAP":
+                day_key = str(meta.get("day_key") or "").strip()
+                trades = safe_float(meta.get("trades"))
+                win_rate = safe_float(meta.get("win_rate_pct"))
+                top_symbol = str(meta.get("top_symbol") or "").strip()
+                top_symbol_pnl = safe_float(meta.get("top_symbol_pnl_usdt"))
+                halt_reason = str(meta.get("halt_reason") or "").strip()
+                if day_key:
+                    lines.append(f"• Day: {day_key}")
+                if trades is not None:
+                    lines.append(f"• Trades: {int(trades)}")
+                if win_rate is not None:
+                    lines.append(f"• Win Rate: {win_rate:.2f}%")
+                if top_symbol:
+                    if top_symbol_pnl is None:
+                        lines.append(f"• Top Symbol: {top_symbol}")
+                    else:
+                        lines.append(f"• Top Symbol: {top_symbol} ({top_symbol_pnl:+.2f} USDT)")
+                if halt_reason:
+                    lines.append(f"• Halt Reason: {halt_reason}")
             include_info = bool(message)
             if event in {"ENTRY", "EXIT", "PARTIAL_EXIT"}:
                 include_info = False
