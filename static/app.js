@@ -98,6 +98,18 @@ let selectedTimeframe = "1m";
 let marketRows = [];
 let currentSummary = null;
 let latestAutoTrade = {};
+let latestChartPayload = null;
+let latestChartTimeframe = "1m";
+let chartPriceLines = [];
+let crosshairSyncGuard = false;
+let chartSeriesLookup = {
+  price: new Map(),
+  rsi: new Map(),
+  macd: new Map(),
+  priceTimes: [],
+  rsiTimes: [],
+  macdTimes: [],
+};
 
 let allAlerts = [];
 let alertCutoffId = 0;
@@ -122,6 +134,64 @@ let rsiLowerSeries;
 let macdSeries;
 let macdSignalSeries;
 let macdHistogramSeries;
+
+function timeframeToSeconds(timeframe) {
+  const tf = String(timeframe || "").toLowerCase().trim();
+  if (tf.endsWith("m")) return Math.max(1, Number.parseInt(tf, 10) || 1) * 60;
+  if (tf.endsWith("h")) return Math.max(1, Number.parseInt(tf, 10) || 1) * 3600;
+  if (tf.endsWith("d")) return Math.max(1, Number.parseInt(tf, 10) || 1) * 86400;
+  return 60;
+}
+
+function normalizeChartTime(rawTime) {
+  if (typeof rawTime === "number" && Number.isFinite(rawTime)) return rawTime;
+  if (rawTime && typeof rawTime === "object") {
+    const year = Number(rawTime.year);
+    const month = Number(rawTime.month);
+    const day = Number(rawTime.day);
+    if (
+      Number.isFinite(year)
+      && Number.isFinite(month)
+      && Number.isFinite(day)
+      && month >= 1
+      && month <= 12
+      && day >= 1
+      && day <= 31
+    ) {
+      return Math.floor(Date.UTC(year, month - 1, day) / 1000);
+    }
+  }
+  return Number.NaN;
+}
+
+function nearestTime(times, target, maxDeltaSeconds) {
+  if (!Array.isArray(times) || times.length === 0 || !Number.isFinite(target)) return null;
+  let best = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < times.length; i += 1) {
+    const t = Number(times[i]);
+    if (!Number.isFinite(t)) continue;
+    const delta = Math.abs(t - target);
+    if (delta < bestDelta) {
+      best = t;
+      bestDelta = delta;
+    }
+  }
+  if (!Number.isFinite(bestDelta) || bestDelta > maxDeltaSeconds) return null;
+  return best;
+}
+
+function valueAtOrNear(map, times, target, maxDeltaSeconds) {
+  if (!Number.isFinite(target)) return null;
+  if (map.has(target)) {
+    const exact = Number(map.get(target));
+    return Number.isFinite(exact) ? exact : null;
+  }
+  const nearTime = nearestTime(times, target, maxDeltaSeconds);
+  if (!Number.isFinite(nearTime)) return null;
+  const nearValue = Number(map.get(nearTime));
+  return Number.isFinite(nearValue) ? nearValue : null;
+}
 
 function escapeHtml(text) {
   return String(text ?? "")
@@ -498,6 +568,279 @@ function baseChartOptions(height) {
   };
 }
 
+function clearChartPriceLines() {
+  if (!candleSeries || !Array.isArray(chartPriceLines)) return;
+  chartPriceLines.forEach((line) => {
+    try {
+      candleSeries.removePriceLine(line);
+    } catch {
+      // ignore stale refs
+    }
+  });
+  chartPriceLines = [];
+}
+
+function addChartPriceLine(price, title, color, lineStyle = 2) {
+  if (!candleSeries || !Number.isFinite(price) || price <= 0) return;
+  const line = candleSeries.createPriceLine({
+    price,
+    color,
+    lineWidth: 1,
+    lineStyle,
+    axisLabelVisible: true,
+    title,
+  });
+  chartPriceLines.push(line);
+}
+
+function rebuildChartSeriesLookup(chart) {
+  const priceMap = new Map();
+  const rsiMap = new Map();
+  const macdMap = new Map();
+  const priceTimes = [];
+  const rsiTimes = [];
+  const macdTimes = [];
+
+  const candles = Array.isArray(chart?.candles) ? chart.candles : [];
+  candles.forEach((point) => {
+    const t = normalizeChartTime(point?.time);
+    const close = Number(point?.close);
+    if (!Number.isFinite(t) || !Number.isFinite(close)) return;
+    priceMap.set(t, close);
+    priceTimes.push(t);
+  });
+
+  const rsiData = Array.isArray(chart?.rsi) ? chart.rsi : [];
+  rsiData.forEach((point) => {
+    const t = normalizeChartTime(point?.time);
+    const value = Number(point?.value);
+    if (!Number.isFinite(t) || !Number.isFinite(value)) return;
+    rsiMap.set(t, value);
+    rsiTimes.push(t);
+  });
+
+  const macdData = Array.isArray(chart?.macd) ? chart.macd : [];
+  macdData.forEach((point) => {
+    const t = normalizeChartTime(point?.time);
+    const value = Number(point?.value);
+    if (!Number.isFinite(t) || !Number.isFinite(value)) return;
+    macdMap.set(t, value);
+    macdTimes.push(t);
+  });
+
+  chartSeriesLookup = {
+    price: priceMap,
+    rsi: rsiMap,
+    macd: macdMap,
+    priceTimes,
+    rsiTimes,
+    macdTimes,
+  };
+}
+
+function markerForJournalEntry(entry) {
+  const eventType = String(entry?.event_type || "").toUpperCase();
+  const side = String(entry?.side || "").toUpperCase();
+  const pnl = Number(entry?.pnl_usdt);
+  const reason = String(entry?.reason || "").toUpperCase();
+  const isProfit = Number.isFinite(pnl) ? pnl >= 0 : true;
+
+  if (eventType === "ENTRY") {
+    if (side === "SHORT") {
+      return {
+        position: "aboveBar",
+        shape: "arrowDown",
+        color: "#f97316",
+        text: "ENTRY S",
+      };
+    }
+    return {
+      position: "belowBar",
+      shape: "arrowUp",
+      color: "#22c55e",
+      text: "ENTRY L",
+    };
+  }
+
+  if (eventType === "PARTIAL_EXIT") {
+    return {
+      position: side === "SHORT" ? "belowBar" : "aboveBar",
+      shape: "circle",
+      color: isProfit ? "#10b981" : "#ef4444",
+      text: "PARTIAL",
+    };
+  }
+
+  if (eventType === "EXIT") {
+    if (reason.includes("TIME STOP")) {
+      return {
+        position: side === "SHORT" ? "belowBar" : "aboveBar",
+        shape: "square",
+        color: "#f59e0b",
+        text: "TIME STOP",
+      };
+    }
+    return {
+      position: side === "SHORT" ? "belowBar" : "aboveBar",
+      shape: side === "SHORT" ? "arrowUp" : "arrowDown",
+      color: isProfit ? "#10b981" : "#ef4444",
+      text: "EXIT",
+    };
+  }
+
+  return null;
+}
+
+function buildTradeMarkers(chart, autoTrade) {
+  const candles = Array.isArray(chart?.candles) ? chart.candles : [];
+  const latestTimeframe = String(chart?.timeframe || latestChartTimeframe || "1m");
+  const candleTimes = candles
+    .map((point) => normalizeChartTime(point?.time))
+    .filter((value) => Number.isFinite(value));
+  if (candleTimes.length === 0) return [];
+
+  const maxDelta = Math.max(60, timeframeToSeconds(latestTimeframe) * 2);
+  const selected = String(chart?.symbol || selectedSymbol || "").toUpperCase();
+  const journal = Array.isArray(autoTrade?.recent_journal) ? autoTrade.recent_journal : [];
+  const scoped = journal
+    .filter((entry) => String(entry?.symbol || "").toUpperCase() === selected)
+    .filter((entry) => {
+      const type = String(entry?.event_type || "").toUpperCase();
+      return type === "ENTRY" || type === "PARTIAL_EXIT" || type === "EXIT";
+    })
+    .slice(-80);
+
+  return scoped
+    .map((entry) => {
+      const rawTs = Number(entry?.timestamp);
+      const mappedTime = nearestTime(candleTimes, rawTs, maxDelta);
+      if (!Number.isFinite(rawTs) || !Number.isFinite(mappedTime)) return null;
+      const marker = markerForJournalEntry(entry);
+      if (!marker) return null;
+      return {
+        time: mappedTime,
+        ...marker,
+      };
+    })
+    .filter(Boolean);
+}
+
+function drawPositionGuides(autoTrade) {
+  clearChartPriceLines();
+  const position = autoTrade?.selected_position;
+  if (!position || typeof position !== "object") return;
+
+  const side = String(position.side || "LONG").toUpperCase();
+  const entryPrice = Number(position.entry_price);
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) return;
+
+  const stopPct = side === "SHORT"
+    ? Number(autoTrade.short_stop_loss_pct)
+    : Number(autoTrade.long_stop_loss_pct);
+  const takePct = side === "SHORT"
+    ? Number(autoTrade.short_take_profit_pct)
+    : Number(autoTrade.long_take_profit_pct);
+  const breakEvenEnabled = Boolean(autoTrade.break_even_enabled);
+  const breakEvenArmed = Boolean(position.break_even_armed);
+  const breakEvenBufferPct = Number(autoTrade.break_even_buffer_pct);
+
+  addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 2);
+  if (Number.isFinite(stopPct) && stopPct > 0) {
+    const stopPrice = side === "SHORT"
+      ? entryPrice * (1 + stopPct / 100)
+      : entryPrice * (1 - stopPct / 100);
+    addChartPriceLine(stopPrice, "SL", "#ef4444", 0);
+  }
+  if (Number.isFinite(takePct) && takePct > 0) {
+    const takePrice = side === "SHORT"
+      ? entryPrice * (1 - takePct / 100)
+      : entryPrice * (1 + takePct / 100);
+    addChartPriceLine(takePrice, "TP", "#22c55e", 0);
+  }
+  if (breakEvenEnabled && breakEvenArmed && Number.isFinite(breakEvenBufferPct)) {
+    const bePrice = side === "SHORT"
+      ? entryPrice * (1 - breakEvenBufferPct / 100)
+      : entryPrice * (1 + breakEvenBufferPct / 100);
+    addChartPriceLine(bePrice, "BE", "#f59e0b", 1);
+  }
+}
+
+function refreshChartDecorations() {
+  if (!candleSeries || !latestChartPayload) {
+    clearChartPriceLines();
+    return;
+  }
+  const markers = buildTradeMarkers(latestChartPayload, latestAutoTrade);
+  candleSeries.setMarkers(markers);
+  drawPositionGuides(latestAutoTrade);
+}
+
+function setupCrosshairSync() {
+  if (
+    typeof priceChart?.setCrosshairPosition !== "function"
+    || typeof priceChart?.clearCrosshairPosition !== "function"
+    || typeof rsiChart?.setCrosshairPosition !== "function"
+    || typeof rsiChart?.clearCrosshairPosition !== "function"
+    || typeof macdChart?.setCrosshairPosition !== "function"
+    || typeof macdChart?.clearCrosshairPosition !== "function"
+  ) {
+    return;
+  }
+
+  const syncTarget = (targetChart, targetSeries, valueKey, sourceTime) => {
+    const tfSeconds = timeframeToSeconds(latestChartTimeframe);
+    const value = valueAtOrNear(
+      chartSeriesLookup[valueKey],
+      chartSeriesLookup[`${valueKey}Times`],
+      sourceTime,
+      Math.max(60, tfSeconds * 2),
+    );
+    if (!Number.isFinite(value)) {
+      targetChart.clearCrosshairPosition();
+      return;
+    }
+    targetChart.setCrosshairPosition(value, sourceTime, targetSeries);
+  };
+
+  const clearTargets = (targets) => {
+    targets.forEach((target) => {
+      target.clearCrosshairPosition();
+    });
+  };
+
+  const wire = (sourceChart, targets) => {
+    sourceChart.subscribeCrosshairMove((param) => {
+      if (crosshairSyncGuard) return;
+      const sourceTime = normalizeChartTime(param?.time);
+      crosshairSyncGuard = true;
+      try {
+        if (!Number.isFinite(sourceTime)) {
+          clearTargets(targets.map((target) => target.chart));
+          return;
+        }
+        targets.forEach((target) => {
+          syncTarget(target.chart, target.series, target.valueKey, sourceTime);
+        });
+      } finally {
+        crosshairSyncGuard = false;
+      }
+    });
+  };
+
+  wire(priceChart, [
+    { chart: rsiChart, series: rsiSeries, valueKey: "rsi" },
+    { chart: macdChart, series: macdSeries, valueKey: "macd" },
+  ]);
+  wire(rsiChart, [
+    { chart: priceChart, series: candleSeries, valueKey: "price" },
+    { chart: macdChart, series: macdSeries, valueKey: "macd" },
+  ]);
+  wire(macdChart, [
+    { chart: priceChart, series: candleSeries, valueKey: "price" },
+    { chart: rsiChart, series: rsiSeries, valueKey: "rsi" },
+  ]);
+}
+
 function fitCharts() {
   if (!priceChart || !rsiChart || !macdChart) return;
 
@@ -555,12 +898,15 @@ function initCharts() {
     priceFormat: { type: "price", precision: 6, minMove: 0.000001 },
   });
 
+  setupCrosshairSync();
   fitCharts();
   window.addEventListener("resize", fitCharts);
 }
 
 function renderChart(chart) {
   if (!chart) return;
+  latestChartPayload = chart;
+  latestChartTimeframe = String(chart.timeframe || selectedTimeframe || "1m");
 
   candleSeries.setData(chart.candles || []);
   ema20Series.setData(chart.ema20 || []);
@@ -575,6 +921,8 @@ function renderChart(chart) {
   macdSeries.setData(chart.macd || []);
   macdSignalSeries.setData(chart.macd_signal || []);
   macdHistogramSeries.setData(chart.macd_histogram || []);
+  rebuildChartSeriesLookup(chart);
+  refreshChartDecorations();
 
   priceChart.timeScale().fitContent();
   rsiChart.timeScale().fitContent();
@@ -1484,6 +1832,7 @@ function renderAutoTrade(payload) {
   renderTradeJournalRows(recentJournal);
   updateExecutionPanel();
   updateGateFailAnalytics();
+  refreshChartDecorations();
 }
 
 function renderWallet(payload) {
