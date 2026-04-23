@@ -553,7 +553,13 @@ class MarketService:
     def build_orderflow_payload(self, symbol: str) -> dict[str, Any]:
         return self.market_state.get_orderflow_payload(symbol)
 
-    def _build_paper_wallet_payload_locked(self, now: float) -> dict[str, Any]:
+    def _build_paper_wallet_payload_locked(
+        self,
+        now: float,
+        *,
+        price_lookup: dict[str, float],
+        paper_positions: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         if not self.state.paper_wallet_initialized:
             self.state.paper_wallet_initialized = True
             self.state.paper_wallet_free_usdt = float(self.settings.paper_wallet_start_usdt)
@@ -561,8 +567,106 @@ class MarketService:
             self.state.paper_wallet_realized_pnl_usdt = 0.0
 
         free_usdt = max(0.0, float(self.state.paper_wallet_free_usdt))
-        used_usdt = max(0.0, float(self.state.paper_wallet_used_usdt))
-        total_usdt = max(0.0, free_usdt + used_usdt)
+        tracked_assets: list[str] = []
+        tracked_asset_set: set[str] = set()
+        for symbol in self.settings.auto_trade_symbols:
+            base_asset = str(symbol or "").split("/", 1)[0].upper()
+            if not base_asset or base_asset == "USDT" or base_asset in tracked_asset_set:
+                continue
+            tracked_assets.append(base_asset)
+            tracked_asset_set.add(base_asset)
+
+        long_amount_by_asset: dict[str, float] = {asset: 0.0 for asset in tracked_assets}
+        long_value_by_asset: dict[str, float] = {asset: 0.0 for asset in tracked_assets}
+        short_reserved_total = 0.0
+        short_equity_total = 0.0
+
+        for raw_symbol, raw_position in paper_positions.items():
+            if not isinstance(raw_position, dict):
+                continue
+
+            symbol = str(raw_symbol or "").strip()
+            if not symbol:
+                continue
+
+            side = str(raw_position.get("side") or "LONG").strip().upper()
+            amount = max(0.0, safe_float(raw_position.get("amount")) or 0.0)
+            if amount <= 0:
+                continue
+
+            entry_price = max(0.0, safe_float(raw_position.get("entry_price")) or 0.0)
+            market_price = safe_float(price_lookup.get(symbol))
+            current_price = max(0.0, market_price if market_price is not None else entry_price)
+
+            if side == "SHORT":
+                reserved_notional = max(
+                    0.0,
+                    safe_float(raw_position.get("notional_usdt")) or (entry_price * amount),
+                )
+                pnl_usdt = (entry_price - current_price) * amount
+                short_reserved_total += reserved_notional
+                short_equity_total += max(0.0, reserved_notional + pnl_usdt)
+                continue
+
+            base_asset = symbol.split("/", 1)[0].upper()
+            if not base_asset:
+                continue
+            if base_asset not in long_amount_by_asset:
+                tracked_assets.append(base_asset)
+                long_amount_by_asset[base_asset] = 0.0
+                long_value_by_asset[base_asset] = 0.0
+
+            long_amount_by_asset[base_asset] += amount
+            long_value_by_asset[base_asset] += current_price * amount
+
+        usdt_total = max(0.0, free_usdt + short_reserved_total)
+        usdt_equity_value = max(0.0, free_usdt + short_equity_total)
+
+        assets: list[dict[str, Any]] = [
+            {
+                "asset": "USDT",
+                "free": round(free_usdt, 8),
+                "used": round(short_reserved_total, 8),
+                "total": round(usdt_total, 8),
+                "price_usdt": 1.0,
+                "usdt_value": round(usdt_equity_value, 6),
+            }
+        ]
+
+        long_equity_total = 0.0
+        for asset in tracked_assets:
+            symbol = f"{asset}/USDT"
+            amount = max(0.0, long_amount_by_asset.get(asset) or 0.0)
+            market_price = safe_float(price_lookup.get(symbol))
+            fallback_value = max(0.0, long_value_by_asset.get(asset) or 0.0)
+
+            if amount > 0 and market_price is not None and market_price > 0:
+                value_usdt = amount * market_price
+                price_usdt = market_price
+            elif amount > 0:
+                value_usdt = fallback_value
+                price_usdt = (fallback_value / amount) if fallback_value > 0 else None
+            else:
+                value_usdt = 0.0
+                price_usdt = (
+                    market_price
+                    if market_price is not None and market_price > 0
+                    else None
+                )
+
+            long_equity_total += value_usdt
+            assets.append(
+                {
+                    "asset": asset,
+                    "free": 0.0,
+                    "used": round(amount, 8),
+                    "total": round(amount, 8),
+                    "price_usdt": (round(price_usdt, 8) if price_usdt is not None else None),
+                    "usdt_value": round(value_usdt, 6),
+                }
+            )
+
+        total_usdt = max(0.0, usdt_equity_value + long_equity_total)
 
         day_key = self.utc_day_key()
         if self.state.wallet_day_key != day_key:
@@ -590,20 +694,11 @@ class MarketService:
             "connected": True,
             "exchange": f"{self.settings.exchange_name}-paper",
             "updated_at": int(now),
-            "asset_count": 1,
+            "asset_count": len(assets),
             "total_usdt_estimate": round(total_usdt, 2),
             "usdt_free": round(free_usdt, 6),
-            "usdt_total": round(total_usdt, 6),
-            "assets": [
-                {
-                    "asset": "USDT",
-                    "free": round(free_usdt, 8),
-                    "used": round(used_usdt, 8),
-                    "total": round(total_usdt, 8),
-                    "price_usdt": 1.0,
-                    "usdt_value": round(total_usdt, 6),
-                }
-            ],
+            "usdt_total": round(usdt_total, 6),
+            "assets": assets[:25],
             "error": None,
             "daily_pnl_estimate_usdt": (
                 round(daily_pnl_estimate, 2)
@@ -627,6 +722,21 @@ class MarketService:
 
     def build_wallet_payload(self, market_rows: list[dict[str, Any]]) -> dict[str, Any]:
         now = time.time()
+        price_lookup: dict[str, float] = {}
+        for row in market_rows:
+            symbol = str(row.get("symbol") or "")
+            price = safe_float(row.get("price"))
+            if symbol and price is not None and price > 0:
+                price_lookup[symbol] = price
+
+        paper_positions: dict[str, dict[str, Any]] = {}
+        if self.settings.paper_trading and self.settings.paper_wallet_enabled:
+            with self.state.auto_trade_lock:
+                paper_positions = {
+                    str(symbol): dict(position)
+                    for symbol, position in self.state.auto_trade_positions.items()
+                    if isinstance(position, dict)
+                }
 
         with self.state.wallet_lock:
             cached = self.state.wallet_cache.get("payload")
@@ -635,7 +745,11 @@ class MarketService:
                 return cached
 
             if self.settings.paper_trading and self.settings.paper_wallet_enabled:
-                payload = self._build_paper_wallet_payload_locked(now)
+                payload = self._build_paper_wallet_payload_locked(
+                    now,
+                    price_lookup=price_lookup,
+                    paper_positions=paper_positions,
+                )
                 self.state.wallet_cache["updated_at"] = now
                 self.state.wallet_cache["payload"] = payload
                 return payload
@@ -697,13 +811,6 @@ class MarketService:
                 used_map = {}
             if not isinstance(total_map, dict):
                 total_map = {}
-
-            price_lookup: dict[str, float] = {}
-            for row in market_rows:
-                symbol = str(row.get("symbol") or "")
-                price = safe_float(row.get("price"))
-                if symbol and price is not None and price > 0:
-                    price_lookup[symbol] = price
 
             asset_codes = set(free_map.keys()) | set(used_map.keys()) | set(total_map.keys())
             assets: list[dict[str, Any]] = []
