@@ -2002,6 +2002,7 @@ class TradingService:
                     self.settings.auto_trade_extreme_volatility_block_enabled
                 ),
                 "max_atr_pct": round(self.settings.auto_trade_max_atr_pct, 4),
+                "target_atr_pct": round(self.settings.auto_trade_target_atr_pct, 4),
                 "max_abs_change_24h_pct": round(self.settings.auto_trade_max_abs_change_24h_pct, 4),
                 "execution_cost_gate_enabled": self.settings.auto_trade_execution_cost_gate_enabled,
                 "max_spread_pct": round(self.settings.auto_trade_max_spread_pct, 4),

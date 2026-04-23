@@ -405,12 +405,49 @@
       gap: 10px;
     }
 
-    #price-chart {
-      height: 430px;
+    .price-chart-wrap {
+      position: relative;
       border: 1px solid var(--border);
       border-radius: 10px;
       overflow: hidden;
       background: #081127;
+    }
+
+    #price-chart {
+      height: 430px;
+    }
+
+    .chart-overlay {
+      position: absolute;
+      left: 8px;
+      top: 8px;
+      z-index: 4;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .chart-overlay-chip {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.34);
+      background: rgba(8, 17, 39, 0.84);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.1;
+      letter-spacing: 0.2px;
+      backdrop-filter: blur(2px);
+    }
+
+    .chart-overlay-chip.pos {
+      color: var(--green);
+      border-color: rgba(22, 199, 132, 0.45);
+    }
+
+    .chart-overlay-chip.neg {
+      color: var(--red);
+      border-color: rgba(255, 91, 91, 0.45);
     }
 
     .subcharts {
@@ -911,7 +948,14 @@
 
     <section class="main-grid">
       <section class="panel chart-stack">
-        <div id="price-chart"></div>
+        <div class="price-chart-wrap">
+          <div id="price-chart"></div>
+          <div class="chart-overlay">
+            <span class="chart-overlay-chip" id="chart-ov-spread">Spread: -</span>
+            <span class="chart-overlay-chip" id="chart-ov-edge">Edge L/S: -</span>
+            <span class="chart-overlay-chip" id="chart-ov-rank">Rank L/S: -</span>
+          </div>
+        </div>
         <div class="subcharts">
           <div class="subchart">
             <h3>RSI (14)</h3>

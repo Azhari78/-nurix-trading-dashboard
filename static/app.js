@@ -29,6 +29,9 @@ const recentTradesBody = document.getElementById("recent-trades-body");
 const priceChartContainer = document.getElementById("price-chart");
 const rsiChartContainer = document.getElementById("rsi-chart");
 const macdChartContainer = document.getElementById("macd-chart");
+const chartOverlaySpreadNode = document.getElementById("chart-ov-spread");
+const chartOverlayEdgeNode = document.getElementById("chart-ov-edge");
+const chartOverlayRankNode = document.getElementById("chart-ov-rank");
 
 const execOutMarketState = document.getElementById("exec-out-market-state");
 const execOutAiGate = document.getElementById("exec-out-ai-gate");
@@ -110,6 +113,8 @@ let chartSeriesLookup = {
   rsiTimes: [],
   macdTimes: [],
 };
+let chartAutoFitArmed = true;
+let lastChartViewKey = "";
 
 let allAlerts = [];
 let alertCutoffId = 0;
@@ -191,6 +196,10 @@ function valueAtOrNear(map, times, target, maxDeltaSeconds) {
   if (!Number.isFinite(nearTime)) return null;
   const nearValue = Number(map.get(nearTime));
   return Number.isFinite(nearValue) ? nearValue : null;
+}
+
+function clampValue(value, low, high) {
+  return Math.max(low, Math.min(high, value));
 }
 
 function escapeHtml(text) {
@@ -350,6 +359,7 @@ function renderWatchlist(rows) {
       selectedSymbol = row.symbol;
       symbolSelect.value = selectedSymbol;
       renderWatchlist(marketRows);
+      armChartAutoFit();
       sendViewUpdate();
     });
 
@@ -369,6 +379,7 @@ function updateStats(summary) {
     statSignal.textContent = "-";
     statStrength.textContent = "-";
     updateExecutionPanel();
+    updateChartOverlay();
     return;
   }
 
@@ -402,6 +413,7 @@ function updateStats(summary) {
   if (strengthValue.includes("SELL")) statStrength.classList.add("neg");
 
   updateExecutionPanel();
+  updateChartOverlay();
 }
 
 function renderMoverList(container, rows, mode) {
@@ -540,6 +552,155 @@ function renderOrderflow(orderflow) {
       orderflowErrorNode.classList.remove("show");
     }
   }
+}
+
+function setChartOverlayValue(node, text, tone = "") {
+  if (!node) return;
+  node.textContent = text;
+  node.classList.remove("pos", "neg");
+  if (tone === "pos") node.classList.add("pos");
+  if (tone === "neg") node.classList.add("neg");
+}
+
+function estimateExpectedEdgePct(summary, autoTrade, side) {
+  const spreadPct = Number(summary?.spread_pct);
+  const spreadCostPct = Number.isFinite(spreadPct) ? Math.max(0, spreadPct) : 0;
+  const feePct = Number(autoTrade?.estimated_fee_pct);
+  const slippagePct = Number(autoTrade?.estimated_slippage_pct);
+  const totalCostPct = spreadCostPct
+    + (Number.isFinite(feePct) ? feePct : 0)
+    + (Number.isFinite(slippagePct) ? slippagePct : 0);
+  const takeProfitPct = side === "SHORT"
+    ? Number(autoTrade?.short_take_profit_pct)
+    : Number(autoTrade?.long_take_profit_pct);
+  if (!Number.isFinite(takeProfitPct)) return null;
+  return takeProfitPct - totalCostPct;
+}
+
+function estimateRankScore(summary, autoTrade, side) {
+  if (!summary || typeof summary !== "object") return null;
+
+  const aiConfidence = Number(summary.ai_confidence) || 0;
+  const aiScoreAbs = Math.abs(Number(summary.ai_score) || 0);
+  const strengthConfidence = Number(summary.strength_confidence) || 0;
+  const volumeRatio = Number(summary.volume_ratio) || 0;
+  const atrPct = Number(summary.atr_pct) || 0;
+  const spreadPct = Number(summary.spread_pct);
+  const rsi = Number(summary.rsi);
+  const macd = Number(summary.macd);
+  const macdSignal = Number(summary.macd_signal);
+
+  let score = 0;
+  score += aiConfidence * 0.42;
+  score += strengthConfidence * 0.28;
+  score += clampValue(volumeRatio, 0, 2) * 20;
+  score += clampValue(aiScoreAbs, 0, 5) * 6;
+
+  if (atrPct > 0) {
+    const atrTargetRaw = Number(autoTrade?.target_atr_pct);
+    const atrTarget = Math.max(0.05, Number.isFinite(atrTargetRaw) ? atrTargetRaw : 0.9);
+    const atrFit = 1 - Math.min(Math.abs(atrPct - atrTarget) / atrTarget, 1);
+    score += atrFit * 10;
+  }
+
+  if (Number.isFinite(spreadPct)) {
+    score -= Math.max(0, spreadPct) * 120;
+  }
+
+  if (Number.isFinite(rsi)) {
+    const isShort = side === "SHORT";
+    const bandMinRaw = Number(isShort ? autoTrade?.short_rsi_min : autoTrade?.long_rsi_min);
+    const bandMaxRaw = Number(isShort ? autoTrade?.short_rsi_max : autoTrade?.long_rsi_max);
+    const defaultBandMin = isShort ? 60 : 45;
+    const defaultBandMax = isShort ? 75 : 60;
+    const bandMin = Number.isFinite(bandMinRaw) ? bandMinRaw : defaultBandMin;
+    const bandMax = Number.isFinite(bandMaxRaw) ? bandMaxRaw : defaultBandMax;
+    const bandMid = (bandMin + bandMax) / 2;
+    const bandHalf = Math.max(1, (bandMax - bandMin) / 2);
+    const rsiFit = Math.max(0, 1 - Math.abs(rsi - bandMid) / bandHalf);
+    score += rsiFit * 8;
+  }
+
+  if (Number.isFinite(macd) && Number.isFinite(macdSignal)) {
+    const macdSpread = macd - macdSignal;
+    const directionalSpread = side === "SHORT" ? -macdSpread : macdSpread;
+    score += clampValue(directionalSpread * 40, -6, 6);
+  }
+
+  return score;
+}
+
+function updateChartOverlay() {
+  if (!chartOverlaySpreadNode || !chartOverlayEdgeNode || !chartOverlayRankNode) return;
+
+  const summary = currentSummary;
+  const autoTrade = latestAutoTrade || {};
+  if (!summary || typeof summary !== "object") {
+    setChartOverlayValue(chartOverlaySpreadNode, "Spread: -");
+    setChartOverlayValue(chartOverlayEdgeNode, "Edge L/S: -");
+    setChartOverlayValue(chartOverlayRankNode, "Rank L/S: -");
+    return;
+  }
+
+  const spreadPct = Number(summary.spread_pct);
+  const maxSpreadPct = Number(autoTrade.max_spread_pct);
+  const spreadTone = Number.isFinite(spreadPct) && Number.isFinite(maxSpreadPct) && spreadPct > maxSpreadPct
+    ? "neg"
+    : Number.isFinite(spreadPct)
+      ? "pos"
+      : "";
+  setChartOverlayValue(
+    chartOverlaySpreadNode,
+    `Spread: ${Number.isFinite(spreadPct) ? `${fmtNumber(spreadPct, 3)}%` : "-"}`,
+    spreadTone,
+  );
+
+  const longEdge = estimateExpectedEdgePct(summary, autoTrade, "LONG");
+  const shortEdge = estimateExpectedEdgePct(summary, autoTrade, "SHORT");
+  const bestEdge = Math.max(
+    Number.isFinite(longEdge) ? longEdge : Number.NEGATIVE_INFINITY,
+    Number.isFinite(shortEdge) ? shortEdge : Number.NEGATIVE_INFINITY,
+  );
+  const minEdge = Number(autoTrade.min_edge_pct);
+  const edgeTone = Number.isFinite(bestEdge) && Number.isFinite(minEdge) && bestEdge < minEdge
+    ? "neg"
+    : Number.isFinite(bestEdge)
+      ? "pos"
+      : "";
+  setChartOverlayValue(
+    chartOverlayEdgeNode,
+    `Edge L/S: ${Number.isFinite(longEdge) ? `${fmtNumber(longEdge, 3)}%` : "-"} / ${
+      Number.isFinite(shortEdge) ? `${fmtNumber(shortEdge, 3)}%` : "-"
+    }`,
+    edgeTone,
+  );
+
+  const longRank = estimateRankScore(summary, autoTrade, "LONG");
+  const shortRank = estimateRankScore(summary, autoTrade, "SHORT");
+  setChartOverlayValue(
+    chartOverlayRankNode,
+    `Rank L/S: ${Number.isFinite(longRank) ? fmtNumber(longRank, 1) : "-"} / ${
+      Number.isFinite(shortRank) ? fmtNumber(shortRank, 1) : "-"
+    }`,
+  );
+}
+
+function armChartAutoFit() {
+  chartAutoFitArmed = true;
+}
+
+function applySmartChartFit(chart) {
+  if (!priceChart || !rsiChart || !macdChart) return;
+  const symbol = String(chart?.symbol || selectedSymbol || "");
+  const timeframe = String(chart?.timeframe || selectedTimeframe || "1m");
+  const viewKey = `${symbol}:${timeframe}`;
+  if (!chartAutoFitArmed && viewKey === lastChartViewKey) return;
+
+  priceChart.timeScale().fitContent();
+  rsiChart.timeScale().fitContent();
+  macdChart.timeScale().fitContent();
+  lastChartViewKey = viewKey;
+  chartAutoFitArmed = false;
 }
 
 function baseChartOptions(height) {
@@ -923,10 +1084,9 @@ function renderChart(chart) {
   macdHistogramSeries.setData(chart.macd_histogram || []);
   rebuildChartSeriesLookup(chart);
   refreshChartDecorations();
+  updateChartOverlay();
 
-  priceChart.timeScale().fitContent();
-  rsiChart.timeScale().fitContent();
-  macdChart.timeScale().fitContent();
+  applySmartChartFit(chart);
 }
 
 function setExecutionOutput(node, value) {
@@ -1833,6 +1993,7 @@ function renderAutoTrade(payload) {
   updateExecutionPanel();
   updateGateFailAnalytics();
   refreshChartDecorations();
+  updateChartOverlay();
 }
 
 function renderWallet(payload) {
@@ -2033,6 +2194,9 @@ function sendViewUpdate() {
 function handleSnapshot(payload) {
   if (!payload || payload.type !== "snapshot") return;
 
+  const previousSymbol = selectedSymbol;
+  const previousTimeframe = selectedTimeframe;
+
   if (Array.isArray(payload.symbols)) {
     syncSymbolOptions(payload.symbols);
   }
@@ -2045,6 +2209,10 @@ function handleSnapshot(payload) {
   if (typeof payload.timeframe === "string") {
     selectedTimeframe = payload.timeframe;
     setActiveTimeframeButton(selectedTimeframe);
+  }
+
+  if (selectedSymbol !== previousSymbol || selectedTimeframe !== previousTimeframe) {
+    armChartAutoFit();
   }
 
   marketRows = Array.isArray(payload.market) ? payload.market : [];
@@ -2135,6 +2303,7 @@ function connectWebSocket() {
 symbolSelect.addEventListener("change", () => {
   selectedSymbol = symbolSelect.value;
   renderWatchlist(marketRows);
+  armChartAutoFit();
   sendViewUpdate();
 });
 
@@ -2145,6 +2314,7 @@ timeframeButtons.forEach((button) => {
 
     selectedTimeframe = timeframe;
     setActiveTimeframeButton(selectedTimeframe);
+    armChartAutoFit();
     sendViewUpdate();
   });
 });
