@@ -450,6 +450,47 @@
       border-color: rgba(255, 91, 91, 0.45);
     }
 
+    .chart-mtf-ribbon {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      z-index: 4;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+      pointer-events: none;
+      max-width: 52%;
+    }
+
+    .mtf-chip {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.34);
+      background: rgba(8, 17, 39, 0.84);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.1;
+      letter-spacing: 0.2px;
+      backdrop-filter: blur(2px);
+      font-weight: 700;
+    }
+
+    .mtf-chip.buy {
+      color: var(--green);
+      border-color: rgba(22, 199, 132, 0.45);
+    }
+
+    .mtf-chip.sell {
+      color: var(--red);
+      border-color: rgba(255, 91, 91, 0.45);
+    }
+
+    .mtf-chip.hold {
+      color: #f8fafc;
+      border-color: rgba(148, 163, 184, 0.4);
+    }
+
     .subcharts {
       display: grid;
       grid-template-columns: 1fr;
@@ -954,6 +995,12 @@
             <span class="chart-overlay-chip" id="chart-ov-spread">Spread: -</span>
             <span class="chart-overlay-chip" id="chart-ov-edge">Edge L/S: -</span>
             <span class="chart-overlay-chip" id="chart-ov-rank">Rank L/S: -</span>
+          </div>
+          <div class="chart-mtf-ribbon">
+            <span class="mtf-chip hold" id="chart-mtf-1m">1m -</span>
+            <span class="mtf-chip hold" id="chart-mtf-5m">5m -</span>
+            <span class="mtf-chip hold" id="chart-mtf-15m">15m -</span>
+            <span class="mtf-chip hold" id="chart-mtf-align">MTF -</span>
           </div>
         </div>
         <div class="subcharts">

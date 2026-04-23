@@ -221,6 +221,124 @@ class MarketService:
 
         return self._runtime_symbols
 
+    @staticmethod
+    def _bias_from_score(score: float) -> str:
+        if score >= 1.0:
+            return "BUY"
+        if score <= -1.0:
+            return "SELL"
+        return "HOLD"
+
+    def build_mtf_bias_payload(
+        self,
+        symbol: str,
+        timeframes: tuple[str, ...] = ("1m", "5m", "15m"),
+    ) -> dict[str, Any]:
+        frames: list[dict[str, Any]] = []
+
+        for timeframe in timeframes:
+            try:
+                indicators = self.get_symbol_indicators_by_timeframe(symbol, timeframe)
+                score = float(
+                    score_indicator_state(
+                        price=indicators["last_close"],
+                        rsi=indicators["rsi"],
+                        ema20=indicators["ema20"],
+                        ema50=indicators["ema50"],
+                        macd=indicators["macd"],
+                        macd_signal=indicators["macd_signal"],
+                    )
+                )
+                bias = self._bias_from_score(score)
+                confidence = min(100, int(round(abs(score) / 5.0 * 100)))
+                frames.append(
+                    {
+                        "timeframe": timeframe,
+                        "bias": bias,
+                        "score": round(score, 2),
+                        "confidence": confidence,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug(
+                    "MTF bias unavailable for %s timeframe=%s: %s",
+                    symbol,
+                    timeframe,
+                    exc,
+                )
+
+        buy_frames = sum(1 for frame in frames if frame.get("bias") == "BUY")
+        sell_frames = sum(1 for frame in frames if frame.get("bias") == "SELL")
+        hold_frames = sum(1 for frame in frames if frame.get("bias") == "HOLD")
+
+        if not frames:
+            alignment = "NO_DATA"
+            dominant_bias = "HOLD"
+        elif buy_frames == len(frames):
+            alignment = "BULLISH"
+            dominant_bias = "BUY"
+        elif sell_frames == len(frames):
+            alignment = "BEARISH"
+            dominant_bias = "SELL"
+        elif hold_frames == len(frames):
+            alignment = "NEUTRAL"
+            dominant_bias = "HOLD"
+        else:
+            alignment = "MIXED"
+            if buy_frames > sell_frames and buy_frames > hold_frames:
+                dominant_bias = "BUY"
+            elif sell_frames > buy_frames and sell_frames > hold_frames:
+                dominant_bias = "SELL"
+            else:
+                dominant_bias = "HOLD"
+
+        return {
+            "frames": frames,
+            "alignment": alignment,
+            "dominant_bias": dominant_bias,
+            "buy_frames": buy_frames,
+            "sell_frames": sell_frames,
+            "hold_frames": hold_frames,
+            "total_frames": len(frames),
+        }
+
+    @staticmethod
+    def add_session_vwap_bands(df: pd.DataFrame) -> pd.DataFrame:
+        if len(df.index) == 0:
+            return df
+
+        frame = df.copy()
+        time_ms = pd.to_numeric(frame["time"], errors="coerce")
+        session_time = pd.to_datetime(time_ms, unit="ms", utc=True, errors="coerce")
+        session_key = session_time.dt.strftime("%Y-%m-%d").fillna("unknown")
+
+        high = pd.to_numeric(frame["high"], errors="coerce")
+        low = pd.to_numeric(frame["low"], errors="coerce")
+        close = pd.to_numeric(frame["close"], errors="coerce")
+        volume = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0)
+
+        typical_price = (high + low + close) / 3.0
+        price_volume = typical_price * volume
+
+        cumulative_pv = price_volume.groupby(session_key).cumsum()
+        cumulative_volume = volume.groupby(session_key).cumsum()
+        vwap = cumulative_pv / cumulative_volume.replace(0.0, pd.NA)
+
+        deviation = close - vwap
+        sample_count = close.groupby(session_key).cumcount().add(1)
+        cumulative_var = (
+            deviation.pow(2).groupby(session_key).cumsum()
+            / sample_count.replace(0, pd.NA)
+        )
+        std_dev = cumulative_var.pow(0.5)
+
+        frame["vwap_session"] = vwap
+        frame["vwap_upper_1"] = vwap + std_dev
+        frame["vwap_lower_1"] = vwap - std_dev
+        frame["vwap_upper_2"] = vwap + (std_dev * 2.0)
+        frame["vwap_lower_2"] = vwap - (std_dev * 2.0)
+        return frame
+
     def build_signal_strength(self, symbol: str) -> dict[str, Any]:
         score_total = 0.0
         frame_count = 0
@@ -720,10 +838,17 @@ class MarketService:
         )
         df = self.apply_live_price_to_latest_candle(df, symbol)
         df = add_indicators(df)
+        df = self.add_session_vwap_bands(df)
+        mtf_bias = self.build_mtf_bias_payload(symbol)
 
         candle_rows: list[dict[str, Any]] = []
         ema20_rows: list[dict[str, Any]] = []
         ema50_rows: list[dict[str, Any]] = []
+        vwap_session_rows: list[dict[str, Any]] = []
+        vwap_upper_1_rows: list[dict[str, Any]] = []
+        vwap_lower_1_rows: list[dict[str, Any]] = []
+        vwap_upper_2_rows: list[dict[str, Any]] = []
+        vwap_lower_2_rows: list[dict[str, Any]] = []
         volume_rows: list[dict[str, Any]] = []
         rsi_rows: list[dict[str, Any]] = []
         macd_rows: list[dict[str, Any]] = []
@@ -761,6 +886,16 @@ class MarketService:
                 ema20_rows.append({"time": ts, "value": float(row["ema20"])})
             if pd.notna(row["ema50"]):
                 ema50_rows.append({"time": ts, "value": float(row["ema50"])})
+            if pd.notna(row.get("vwap_session")):
+                vwap_session_rows.append({"time": ts, "value": float(row["vwap_session"])})
+            if pd.notna(row.get("vwap_upper_1")):
+                vwap_upper_1_rows.append({"time": ts, "value": float(row["vwap_upper_1"])})
+            if pd.notna(row.get("vwap_lower_1")):
+                vwap_lower_1_rows.append({"time": ts, "value": float(row["vwap_lower_1"])})
+            if pd.notna(row.get("vwap_upper_2")):
+                vwap_upper_2_rows.append({"time": ts, "value": float(row["vwap_upper_2"])})
+            if pd.notna(row.get("vwap_lower_2")):
+                vwap_lower_2_rows.append({"time": ts, "value": float(row["vwap_lower_2"])})
             if pd.notna(row["rsi"]):
                 rsi_rows.append({"time": ts, "value": float(row["rsi"])})
             if pd.notna(row["macd"]):
@@ -788,6 +923,11 @@ class MarketService:
             "rsi": round(float(last["rsi"]), 2) if pd.notna(last["rsi"]) else None,
             "ema20": round(float(last["ema20"]), 6) if pd.notna(last["ema20"]) else None,
             "ema50": round(float(last["ema50"]), 6) if pd.notna(last["ema50"]) else None,
+            "vwap_session": (
+                round(float(last["vwap_session"]), 6)
+                if pd.notna(last.get("vwap_session"))
+                else None
+            ),
             "macd": round(float(last["macd"]), 6) if pd.notna(last["macd"]) else None,
             "macd_signal": (
                 round(float(last["macd_signal"]), 6)
@@ -802,11 +942,17 @@ class MarketService:
             "candles": candle_rows,
             "ema20": ema20_rows,
             "ema50": ema50_rows,
+            "vwap_session": vwap_session_rows,
+            "vwap_upper_1": vwap_upper_1_rows,
+            "vwap_lower_1": vwap_lower_1_rows,
+            "vwap_upper_2": vwap_upper_2_rows,
+            "vwap_lower_2": vwap_lower_2_rows,
             "volume": volume_rows,
             "rsi": rsi_rows,
             "macd": macd_rows,
             "macd_signal": macd_signal_rows,
             "macd_histogram": macd_histogram_rows,
+            "mtf_bias": mtf_bias,
             "summary": summary,
         }
 
@@ -821,11 +967,25 @@ class MarketService:
             "candles": [],
             "ema20": [],
             "ema50": [],
+            "vwap_session": [],
+            "vwap_upper_1": [],
+            "vwap_lower_1": [],
+            "vwap_upper_2": [],
+            "vwap_lower_2": [],
             "volume": [],
             "rsi": [],
             "macd": [],
             "macd_signal": [],
             "macd_histogram": [],
+            "mtf_bias": {
+                "frames": [],
+                "alignment": "NO_DATA",
+                "dominant_bias": "HOLD",
+                "buy_frames": 0,
+                "sell_frames": 0,
+                "hold_frames": 0,
+                "total_frames": 0,
+            },
             "summary": {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -833,6 +993,7 @@ class MarketService:
                 "rsi": None,
                 "ema20": None,
                 "ema50": None,
+                "vwap_session": None,
                 "macd": None,
                 "macd_signal": None,
             },

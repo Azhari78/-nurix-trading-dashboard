@@ -32,6 +32,10 @@ const macdChartContainer = document.getElementById("macd-chart");
 const chartOverlaySpreadNode = document.getElementById("chart-ov-spread");
 const chartOverlayEdgeNode = document.getElementById("chart-ov-edge");
 const chartOverlayRankNode = document.getElementById("chart-ov-rank");
+const chartMtf1mNode = document.getElementById("chart-mtf-1m");
+const chartMtf5mNode = document.getElementById("chart-mtf-5m");
+const chartMtf15mNode = document.getElementById("chart-mtf-15m");
+const chartMtfAlignNode = document.getElementById("chart-mtf-align");
 
 const execOutMarketState = document.getElementById("exec-out-market-state");
 const execOutAiGate = document.getElementById("exec-out-ai-gate");
@@ -130,6 +134,11 @@ let macdChart;
 let candleSeries;
 let ema20Series;
 let ema50Series;
+let vwapSessionSeries;
+let vwapUpper1Series;
+let vwapLower1Series;
+let vwapUpper2Series;
+let vwapLower2Series;
 let volumeSeries;
 
 let rsiSeries;
@@ -685,6 +694,42 @@ function updateChartOverlay() {
   );
 }
 
+function setMtfChip(node, label, bias) {
+  if (!node) return;
+  const tone = String(bias || "HOLD").toUpperCase();
+  node.classList.remove("buy", "sell", "hold");
+  if (tone === "BUY") node.classList.add("buy");
+  else if (tone === "SELL") node.classList.add("sell");
+  else node.classList.add("hold");
+  node.textContent = label;
+}
+
+function renderMtfRibbon(mtfBias) {
+  const frames = Array.isArray(mtfBias?.frames) ? mtfBias.frames : [];
+  const frameMap = new Map(
+    frames.map((frame) => [
+      String(frame?.timeframe || ""),
+      String(frame?.bias || "HOLD").toUpperCase(),
+    ]),
+  );
+  const tf1 = frameMap.get("1m") || "HOLD";
+  const tf5 = frameMap.get("5m") || "HOLD";
+  const tf15 = frameMap.get("15m") || "HOLD";
+
+  setMtfChip(chartMtf1mNode, `1m ${tf1}`, tf1);
+  setMtfChip(chartMtf5mNode, `5m ${tf5}`, tf5);
+  setMtfChip(chartMtf15mNode, `15m ${tf15}`, tf15);
+
+  const alignment = String(mtfBias?.alignment || "NO_DATA").toUpperCase();
+  const dominant = String(mtfBias?.dominant_bias || "HOLD").toUpperCase();
+  const alignTone = alignment === "BULLISH"
+    ? "BUY"
+    : alignment === "BEARISH"
+      ? "SELL"
+      : dominant;
+  setMtfChip(chartMtfAlignNode, `MTF ${alignment}`, alignTone);
+}
+
 function armChartAutoFit() {
   chartAutoFitArmed = true;
 }
@@ -1031,6 +1076,45 @@ function initCharts() {
 
   ema20Series = priceChart.addLineSeries({ color: "#f5a524", lineWidth: 2 });
   ema50Series = priceChart.addLineSeries({ color: "#60a5fa", lineWidth: 2 });
+  vwapSessionSeries = priceChart.addLineSeries({
+    color: "#f8fafc",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  vwapUpper1Series = priceChart.addLineSeries({
+    color: "rgba(248, 250, 252, 0.45)",
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  vwapLower1Series = priceChart.addLineSeries({
+    color: "rgba(248, 250, 252, 0.45)",
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  vwapUpper2Series = priceChart.addLineSeries({
+    color: "rgba(148, 163, 184, 0.33)",
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  vwapLower2Series = priceChart.addLineSeries({
+    color: "rgba(148, 163, 184, 0.33)",
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
 
   volumeSeries = priceChart.addHistogramSeries({
     priceFormat: { type: "volume" },
@@ -1072,6 +1156,11 @@ function renderChart(chart) {
   candleSeries.setData(chart.candles || []);
   ema20Series.setData(chart.ema20 || []);
   ema50Series.setData(chart.ema50 || []);
+  vwapSessionSeries.setData(chart.vwap_session || []);
+  vwapUpper1Series.setData(chart.vwap_upper_1 || []);
+  vwapLower1Series.setData(chart.vwap_lower_1 || []);
+  vwapUpper2Series.setData(chart.vwap_upper_2 || []);
+  vwapLower2Series.setData(chart.vwap_lower_2 || []);
   volumeSeries.setData(chart.volume || []);
 
   const rsiData = chart.rsi || [];
@@ -1085,6 +1174,7 @@ function renderChart(chart) {
   rebuildChartSeriesLookup(chart);
   refreshChartDecorations();
   updateChartOverlay();
+  renderMtfRibbon(chart.mtf_bias);
 
   applySmartChartFit(chart);
 }
