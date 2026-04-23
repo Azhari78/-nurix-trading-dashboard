@@ -697,10 +697,10 @@ function updateChartOverlay() {
 function setMtfChip(node, label, bias) {
   if (!node) return;
   const tone = String(bias || "HOLD").toUpperCase();
-  node.classList.remove("buy", "sell", "hold");
-  if (tone === "BUY") node.classList.add("buy");
-  else if (tone === "SELL") node.classList.add("sell");
-  else node.classList.add("hold");
+  node.classList.remove("mtf-buy", "mtf-sell", "mtf-hold");
+  if (tone === "BUY") node.classList.add("mtf-buy");
+  else if (tone === "SELL") node.classList.add("mtf-sell");
+  else node.classList.add("mtf-hold");
   node.textContent = label;
 }
 
