@@ -604,6 +604,85 @@ class TradingService:
             )
         return False, ""
 
+    def _execution_cost_gate_allows(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+        if not self.settings.auto_trade_execution_cost_gate_enabled:
+            return True, ""
+
+        spread_pct = safe_float(row.get("spread_pct"))
+        if (
+            spread_pct is not None
+            and spread_pct > self.settings.auto_trade_max_spread_pct
+        ):
+            return (
+                False,
+                (
+                    f"spread {spread_pct:.3f}% > "
+                    f"{self.settings.auto_trade_max_spread_pct:.3f}%"
+                ),
+            )
+
+        _, take_profit_pct, _ = self._side_stop_take_trail(side)
+        total_cost_pct = (
+            max(0.0, spread_pct or 0.0)
+            + self.settings.auto_trade_estimated_fee_pct
+            + self.settings.auto_trade_estimated_slippage_pct
+        )
+        expected_edge_pct = take_profit_pct - total_cost_pct
+        if expected_edge_pct < self.settings.auto_trade_min_edge_pct:
+            return (
+                False,
+                (
+                    f"edge {expected_edge_pct:.3f}% < "
+                    f"{self.settings.auto_trade_min_edge_pct:.3f}%"
+                ),
+            )
+
+        return True, ""
+
+    def _entry_rank_score(self, row: dict[str, Any], side: str) -> float:
+        ai_confidence = safe_float(row.get("ai_confidence")) or 0.0
+        ai_score_abs = abs(safe_float(row.get("ai_score")) or 0.0)
+        strength_confidence = safe_float(row.get("strength_confidence")) or 0.0
+        volume_ratio = safe_float(row.get("volume_ratio")) or 0.0
+        atr_pct = safe_float(row.get("atr_pct")) or 0.0
+        spread_pct = safe_float(row.get("spread_pct"))
+        rsi = safe_float(row.get("rsi"))
+        macd = safe_float(row.get("macd"))
+        macd_signal = safe_float(row.get("macd_signal"))
+
+        score = 0.0
+        score += ai_confidence * 0.42
+        score += strength_confidence * 0.28
+        score += self._clamp(volume_ratio, 0.0, 2.0) * 20.0
+        score += self._clamp(ai_score_abs, 0.0, 5.0) * 6.0
+
+        if atr_pct > 0:
+            atr_target = max(0.05, self.settings.auto_trade_target_atr_pct)
+            atr_fit = 1.0 - min(abs(atr_pct - atr_target) / atr_target, 1.0)
+            score += atr_fit * 10.0
+
+        if spread_pct is not None:
+            score -= max(0.0, spread_pct) * 120.0
+
+        if rsi is not None:
+            if side == "SHORT":
+                band_min = self.settings.short_rsi_min
+                band_max = self.settings.short_rsi_max
+            else:
+                band_min = self.settings.long_rsi_min
+                band_max = self.settings.long_rsi_max
+            band_mid = (band_min + band_max) / 2.0
+            band_half = max(1.0, (band_max - band_min) / 2.0)
+            rsi_fit = max(0.0, 1.0 - abs(rsi - band_mid) / band_half)
+            score += rsi_fit * 8.0
+
+        if macd is not None and macd_signal is not None:
+            macd_spread = macd - macd_signal
+            directional_spread = macd_spread if side == "LONG" else -macd_spread
+            score += self._clamp(directional_spread * 40.0, -6.0, 6.0)
+
+        return round(score, 4)
+
     def _adaptive_cooldown_multiplier(self, row: dict[str, Any]) -> float:
         if not self.settings.auto_trade_cooldown_adaptive_enabled:
             return 1.0
@@ -948,6 +1027,16 @@ class TradingService:
                     if current_price <= trailing_stop:
                         return "TRAILING STOP", pnl_pct
 
+        if self.settings.auto_trade_time_stop_enabled:
+            opened_at = safe_float(position.get("opened_at")) or 0.0
+            if opened_at > 0:
+                elapsed_minutes = (time.time() - opened_at) / 60.0
+                if (
+                    elapsed_minutes >= self.settings.auto_trade_time_stop_minutes
+                    and pnl_pct <= self.settings.auto_trade_time_stop_min_pnl_pct
+                ):
+                    return "TIME STOP", pnl_pct
+
         signal = str(row.get("signal") or "HOLD").upper()
         strength = str(row.get("strength") or "HOLD").upper()
         if position_side == "SHORT":
@@ -1257,13 +1346,6 @@ class TradingService:
                 self.state.auto_trade_halt_day = None
 
             self._maybe_send_daily_recap(now, day_key)
-            if self.state.auto_trade_halt_until > now:
-                remaining = int(self.state.auto_trade_halt_until - now)
-                self.state.auto_trade_last_reason = (
-                    f"Risk halt ({max(0, remaining)}s): "
-                    f"{self.state.auto_trade_halt_reason or 'cooldown risk pause'}"
-                )
-                return
 
             rows_by_symbol = {
                 str(row.get("symbol")): row for row in market_rows if row.get("symbol")
@@ -1305,10 +1387,12 @@ class TradingService:
                     )
                     if partial_result.get("ok"):
                         realized_amount = safe_float(partial_result.get("filled")) or partial_amount
+                        realized_price = safe_float(partial_result.get("average")) or current_price
+                        realized_pnl_pct = self._pnl_pct(entry_price, realized_price, position_side)
                         realized_pnl = self._pnl_usdt(
                             position_side,
                             entry_price,
-                            current_price,
+                            realized_price,
                             realized_amount,
                         )
                         self.state.auto_trade_daily_pnl[day_key] += realized_pnl
@@ -1333,9 +1417,9 @@ class TradingService:
                             side=position_side,
                             reason="PARTIAL TAKE PROFIT",
                             pnl_usdt=realized_pnl,
-                            pnl_pct=pnl_pct_live,
+                            pnl_pct=realized_pnl_pct,
                             notional_usdt=safe_float(position.get("notional_usdt")),
-                            price=current_price,
+                            price=realized_price,
                             amount=realized_amount,
                             metadata={"remaining_amount": round(position["amount"], 8)},
                         )
@@ -1343,7 +1427,7 @@ class TradingService:
                             symbol=symbol,
                             position_side=position_side,
                             order_side=exit_side,
-                            exit_price=current_price,
+                            exit_price=realized_price,
                             master_amount=realized_amount,
                             reason="PARTIAL TAKE PROFIT",
                             partial=True,
@@ -1353,7 +1437,7 @@ class TradingService:
                             "PARTIAL_EXIT",
                             f"{exit_side.upper()} ({position_side} PARTIAL)",
                             f"Partial TP hit • PnL {realized_pnl:.2f} USDT",
-                            price=current_price,
+                            price=realized_price,
                             amount=realized_amount,
                             pnl_usdt=realized_pnl,
                             mode=str(partial_result.get("mode") or "live"),
@@ -1368,7 +1452,7 @@ class TradingService:
                                 "event": "PARTIAL_EXIT",
                                 "position_side": position_side,
                                 "order_side": exit_side.upper(),
-                                "price": current_price,
+                                "price": realized_price,
                                 "amount": realized_amount,
                                 "pnl_usdt": realized_pnl,
                                 "reason": "PARTIAL TAKE PROFIT",
@@ -1419,7 +1503,8 @@ class TradingService:
 
                 entry_price = safe_float(position.get("entry_price")) or current_price
                 filled_amount = safe_float(order_result.get("filled")) or amount
-                pnl_usdt = self._pnl_usdt(position_side, entry_price, current_price, filled_amount)
+                exit_price = safe_float(order_result.get("average")) or current_price
+                pnl_usdt = self._pnl_usdt(position_side, entry_price, exit_price, filled_amount)
                 self.state.auto_trade_daily_pnl[day_key] += pnl_usdt
                 self._paper_wallet_on_close(
                     position=position,
@@ -1441,16 +1526,16 @@ class TradingService:
                     side=position_side,
                     reason=reason,
                     pnl_usdt=pnl_usdt,
-                    pnl_pct=self._pnl_pct(entry_price, current_price, position_side),
+                    pnl_pct=self._pnl_pct(entry_price, exit_price, position_side),
                     notional_usdt=safe_float(position.get("notional_usdt")),
-                    price=current_price,
+                    price=exit_price,
                     amount=filled_amount,
                 )
                 self._copy_trade_on_exit(
                     symbol=symbol,
                     position_side=position_side,
                     order_side=exit_side,
-                    exit_price=current_price,
+                    exit_price=exit_price,
                     master_amount=filled_amount,
                     reason=reason,
                     partial=False,
@@ -1461,7 +1546,7 @@ class TradingService:
                     "EXIT",
                     f"{exit_side.upper()} ({position_side} EXIT)",
                     f"{reason} • PnL {pnl_usdt:.2f} USDT",
-                    price=current_price,
+                    price=exit_price,
                     amount=filled_amount,
                     pnl_usdt=pnl_usdt,
                     mode=str(order_result.get("mode") or "live"),
@@ -1476,7 +1561,7 @@ class TradingService:
                         "event": "EXIT",
                         "position_side": position_side,
                         "order_side": exit_side.upper(),
-                        "price": current_price,
+                        "price": exit_price,
                         "amount": filled_amount,
                         "pnl_usdt": pnl_usdt,
                         "reason": reason,
@@ -1557,6 +1642,20 @@ class TradingService:
                 return
 
             self.state.auto_trade_halt_day = None
+            if self.state.auto_trade_halt_until > now:
+                remaining = int(self.state.auto_trade_halt_until - now)
+                halt_reason = str(self.state.auto_trade_halt_reason or "cooldown risk pause")
+                if self.state.auto_trade_positions:
+                    self.state.auto_trade_last_reason = (
+                        f"Risk halt ({max(0, remaining)}s): {halt_reason} • "
+                        "entries paused, monitoring open positions"
+                    )
+                else:
+                    self.state.auto_trade_last_reason = (
+                        f"Risk halt ({max(0, remaining)}s): {halt_reason}"
+                    )
+                return
+
             if not self._session_allows_entry(now):
                 self.state.auto_trade_last_reason = (
                     "Session filter active: outside allowed UTC windows "
@@ -1564,6 +1663,7 @@ class TradingService:
                 )
                 return
 
+            entry_candidates: list[dict[str, Any]] = []
             for row in market_rows:
                 symbol = str(row.get("symbol") or "")
                 if not symbol or symbol not in self._runtime_auto_trade_symbols_set:
@@ -1610,6 +1710,11 @@ class TradingService:
                     status_reason = f"{symbol}: {reason_text}"
                     continue
 
+                cost_ok, cost_reason = self._execution_cost_gate_allows(row, entry_side)
+                if not cost_ok:
+                    status_reason = f"{symbol}: execution cost gate ({cost_reason})"
+                    continue
+
                 ai_ok, ai_reason = self._ai_filter_allows(
                     row,
                     entry_side,
@@ -1624,6 +1729,54 @@ class TradingService:
                         f"{symbol}: short entry blocked in LIVE spot mode "
                         "(use PAPER or derivatives integration)"
                     )
+                    continue
+
+                entry_candidates.append(
+                    {
+                        "symbol": symbol,
+                        "row": row,
+                        "entry_side": entry_side,
+                        "reason_text": reason_text,
+                        "rank_score": self._entry_rank_score(row, entry_side),
+                    }
+                )
+
+            if self.settings.auto_trade_symbol_rank_enabled and entry_candidates:
+                entry_candidates.sort(
+                    key=lambda candidate: float(candidate.get("rank_score") or 0.0),
+                    reverse=True,
+                )
+                top_n = max(1, self.settings.auto_trade_symbol_rank_top_n)
+                if len(entry_candidates) > top_n:
+                    entry_candidates = entry_candidates[:top_n]
+
+            for candidate in entry_candidates:
+                symbol = str(candidate.get("symbol") or "")
+                row = candidate.get("row") if isinstance(candidate.get("row"), dict) else {}
+                entry_side = str(candidate.get("entry_side") or "LONG")
+                reason_text = str(candidate.get("reason_text") or "")
+                rank_score = float(candidate.get("rank_score") or 0.0)
+
+                if not symbol or not isinstance(row, dict):
+                    continue
+                if symbol in self.state.auto_trade_positions:
+                    status_reason = f"{symbol}: position already open"
+                    continue
+                if (
+                    self.settings.auto_trade_max_open_positions > 0
+                    and len(self.state.auto_trade_positions)
+                    >= self.settings.auto_trade_max_open_positions
+                ):
+                    status_reason = (
+                        "max open positions reached "
+                        f"({len(self.state.auto_trade_positions)}/"
+                        f"{self.settings.auto_trade_max_open_positions})"
+                    )
+                    break
+
+                current_price = safe_float(row.get("price"))
+                if current_price is None or current_price <= 0:
+                    status_reason = f"{symbol}: waiting valid price"
                     continue
 
                 notional_usdt = self._base_notional_usdt(
@@ -1742,7 +1895,7 @@ class TradingService:
                     available_usdt = max(0.0, available_usdt - notional_usdt)
                 status_reason = (
                     f"{symbol}: {entry_side} opened at {entry_price:.6f} • "
-                    f"profile {adaptive_profile['name']}"
+                    f"rank {rank_score:.1f} • profile {adaptive_profile['name']}"
                 )
                 if forward_reason:
                     status_reason = f"{status_reason} • {forward_reason}"
@@ -1787,7 +1940,9 @@ class TradingService:
                     metadata={
                         "rsi": row.get("rsi"),
                         "atr_pct": row.get("atr_pct"),
+                        "spread_pct": row.get("spread_pct"),
                         "volume_ratio": row.get("volume_ratio"),
+                        "rank_score": rank_score,
                         "guardrail_mult": round(forward_risk_multiplier, 4),
                         "adaptive_profile": adaptive_profile["name"],
                         "adaptive_mult": round(float(adaptive_profile["risk_mult"]), 4),
@@ -1848,6 +2003,16 @@ class TradingService:
                 ),
                 "max_atr_pct": round(self.settings.auto_trade_max_atr_pct, 4),
                 "max_abs_change_24h_pct": round(self.settings.auto_trade_max_abs_change_24h_pct, 4),
+                "execution_cost_gate_enabled": self.settings.auto_trade_execution_cost_gate_enabled,
+                "max_spread_pct": round(self.settings.auto_trade_max_spread_pct, 4),
+                "estimated_fee_pct": round(self.settings.auto_trade_estimated_fee_pct, 4),
+                "estimated_slippage_pct": round(
+                    self.settings.auto_trade_estimated_slippage_pct,
+                    4,
+                ),
+                "min_edge_pct": round(self.settings.auto_trade_min_edge_pct, 4),
+                "symbol_rank_enabled": self.settings.auto_trade_symbol_rank_enabled,
+                "symbol_rank_top_n": self.settings.auto_trade_symbol_rank_top_n,
                 "partial_take_profit_enabled": self.settings.auto_trade_partial_take_profit_enabled,
                 "partial_take_profit_pct": round(self.settings.auto_trade_partial_take_profit_pct, 4),
                 "partial_take_profit_ratio": round(
@@ -1860,6 +2025,9 @@ class TradingService:
                     4,
                 ),
                 "break_even_buffer_pct": round(self.settings.auto_trade_break_even_buffer_pct, 4),
+                "time_stop_enabled": self.settings.auto_trade_time_stop_enabled,
+                "time_stop_minutes": self.settings.auto_trade_time_stop_minutes,
+                "time_stop_min_pnl_pct": round(self.settings.auto_trade_time_stop_min_pnl_pct, 4),
                 "adaptive_enabled": self.settings.auto_trade_auto_adapt_enabled,
                 "adaptive_profile": self.state.auto_trade_adaptive_profile,
                 "adaptive_reason": self.state.auto_trade_adaptive_reason,

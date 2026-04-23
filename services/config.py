@@ -239,6 +239,13 @@ class Settings:
     auto_trade_extreme_volatility_block_enabled: bool
     auto_trade_max_atr_pct: float
     auto_trade_max_abs_change_24h_pct: float
+    auto_trade_execution_cost_gate_enabled: bool
+    auto_trade_max_spread_pct: float
+    auto_trade_estimated_fee_pct: float
+    auto_trade_estimated_slippage_pct: float
+    auto_trade_min_edge_pct: float
+    auto_trade_symbol_rank_enabled: bool
+    auto_trade_symbol_rank_top_n: int
     long_stop_loss_pct: float
     long_take_profit_pct: float
     long_trailing_pct: float
@@ -251,6 +258,9 @@ class Settings:
     auto_trade_break_even_enabled: bool
     auto_trade_break_even_trigger_pct: float
     auto_trade_break_even_buffer_pct: float
+    auto_trade_time_stop_enabled: bool
+    auto_trade_time_stop_minutes: int
+    auto_trade_time_stop_min_pnl_pct: float
     stop_loss_pct: float
     take_profit_pct: float
     cooldown_min_seconds: int
@@ -478,6 +488,34 @@ def load_settings() -> Settings:
         parse_env_float(os.getenv("AUTO_TRADE_MAX_ABS_CHANGE_24H_PCT"), 20.0),
         0.1,
     )
+    auto_trade_execution_cost_gate_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_EXECUTION_COST_GATE_ENABLED"),
+        True,
+    )
+    auto_trade_max_spread_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MAX_SPREAD_PCT"), 0.12),
+        0.0,
+    )
+    auto_trade_estimated_fee_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_ESTIMATED_FEE_PCT"), 0.08),
+        0.0,
+    )
+    auto_trade_estimated_slippage_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_ESTIMATED_SLIPPAGE_PCT"), 0.05),
+        0.0,
+    )
+    auto_trade_min_edge_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MIN_EDGE_PCT"), 0.12),
+        0.0,
+    )
+    auto_trade_symbol_rank_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_SYMBOL_RANK_ENABLED"),
+        True,
+    )
+    auto_trade_symbol_rank_top_n = max(
+        parse_env_int(os.getenv("AUTO_TRADE_SYMBOL_RANK_TOP_N"), 2),
+        1,
+    )
 
     auto_trade_partial_take_profit_enabled = parse_env_bool(
         os.getenv("AUTO_TRADE_PARTIAL_TP_ENABLED"),
@@ -502,6 +540,18 @@ def load_settings() -> Settings:
     auto_trade_break_even_buffer_pct = max(
         parse_env_float(os.getenv("AUTO_TRADE_BREAK_EVEN_BUFFER_PCT"), 0.1),
         0.0,
+    )
+    auto_trade_time_stop_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_TIME_STOP_ENABLED"),
+        True,
+    )
+    auto_trade_time_stop_minutes = max(
+        parse_env_int(os.getenv("AUTO_TRADE_TIME_STOP_MINUTES"), 15),
+        1,
+    )
+    auto_trade_time_stop_min_pnl_pct = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_TIME_STOP_MIN_PNL_PCT"), 0.15), -5.0),
+        5.0,
     )
 
     auto_trade_cooldown_adaptive_enabled = parse_env_bool(
@@ -674,6 +724,13 @@ def load_settings() -> Settings:
         auto_trade_extreme_volatility_block_enabled=auto_trade_extreme_volatility_block_enabled,
         auto_trade_max_atr_pct=auto_trade_max_atr_pct,
         auto_trade_max_abs_change_24h_pct=auto_trade_max_abs_change_24h_pct,
+        auto_trade_execution_cost_gate_enabled=auto_trade_execution_cost_gate_enabled,
+        auto_trade_max_spread_pct=auto_trade_max_spread_pct,
+        auto_trade_estimated_fee_pct=auto_trade_estimated_fee_pct,
+        auto_trade_estimated_slippage_pct=auto_trade_estimated_slippage_pct,
+        auto_trade_min_edge_pct=auto_trade_min_edge_pct,
+        auto_trade_symbol_rank_enabled=auto_trade_symbol_rank_enabled,
+        auto_trade_symbol_rank_top_n=auto_trade_symbol_rank_top_n,
         long_stop_loss_pct=long_stop_loss_pct,
         long_take_profit_pct=long_take_profit_pct,
         long_trailing_pct=long_trailing_pct,
@@ -686,6 +743,9 @@ def load_settings() -> Settings:
         auto_trade_break_even_enabled=auto_trade_break_even_enabled,
         auto_trade_break_even_trigger_pct=auto_trade_break_even_trigger_pct,
         auto_trade_break_even_buffer_pct=auto_trade_break_even_buffer_pct,
+        auto_trade_time_stop_enabled=auto_trade_time_stop_enabled,
+        auto_trade_time_stop_minutes=auto_trade_time_stop_minutes,
+        auto_trade_time_stop_min_pnl_pct=auto_trade_time_stop_min_pnl_pct,
         stop_loss_pct=base_stop_loss_pct,
         take_profit_pct=base_take_profit_pct,
         cooldown_min_seconds=cooldown_min_seconds,

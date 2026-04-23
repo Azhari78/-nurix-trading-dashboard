@@ -282,6 +282,14 @@ class MarketService:
                 if volume_24h is None:
                     base_volume = safe_float(ticker.get("baseVolume")) or 0.0
                     volume_24h = base_volume * price
+                orderflow_payload = self.market_state.get_orderflow_payload(symbol)
+                orderbook = (
+                    (orderflow_payload or {}).get("orderbook", {})
+                    if isinstance(orderflow_payload, dict)
+                    else {}
+                )
+                spread = safe_float(orderbook.get("spread"))
+                spread_pct = safe_float(orderbook.get("spread_pct"))
 
                 signal = get_signal(
                     price=price,
@@ -317,6 +325,8 @@ class MarketService:
                         "macd": round(indicators["macd"], 6),
                         "macd_signal": round(indicators["macd_signal"], 6),
                         "atr_pct": round(float(indicators.get("atr_pct") or 0.0), 3),
+                        "spread": round(spread, 6) if spread is not None else None,
+                        "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
                         "volume_ratio": round(float(indicators.get("volume_ratio") or 1.0), 3),
                         "signal": signal,
                         "strength": strength["label"],
@@ -362,6 +372,8 @@ class MarketService:
                         "macd": None,
                         "macd_signal": None,
                         "atr_pct": None,
+                        "spread": None,
+                        "spread_pct": None,
                         "volume_ratio": None,
                         "signal": "HOLD",
                         "strength": "HOLD",
