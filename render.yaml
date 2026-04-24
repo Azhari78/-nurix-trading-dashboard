@@ -71,6 +71,8 @@ services:
         value: "true"
       - key: AUTO_TRADE_ENTRY_CONFIRM_MACD
         value: "true"
+      - key: AUTO_TRADE_ENTRY_REQUIRE_MACD_DATA
+        value: "true"
       - key: AUTO_TRADE_MIN_VOLUME_RATIO
         value: "1.0"
       - key: AUTO_TRADE_MIN_STRENGTH_CONFIDENCE

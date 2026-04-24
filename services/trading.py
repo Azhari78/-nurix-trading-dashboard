@@ -1068,13 +1068,18 @@ class TradingService:
                 return False, "LONG rule: price must be > MA50"
             if self.settings.auto_trade_entry_confirm_ema_stack and ema20 <= ema50:
                 return False, "LONG rule: EMA20 must be > EMA50"
-            if (
-                self.settings.auto_trade_entry_confirm_macd
-                and macd is not None
-                and macd_signal is not None
-                and macd < macd_signal
-            ):
-                return False, "LONG rule: MACD must be above signal"
+            if self.settings.auto_trade_entry_confirm_macd:
+                if (
+                    self.settings.auto_trade_entry_require_macd_data
+                    and (macd is None or macd_signal is None)
+                ):
+                    return False, "LONG rule: waiting MACD/signal data"
+                if (
+                    macd is not None
+                    and macd_signal is not None
+                    and macd < macd_signal
+                ):
+                    return False, "LONG rule: MACD must be above signal"
             if rsi < self.settings.long_rsi_min or rsi > self.settings.long_rsi_max:
                 return (
                     False,
@@ -1089,13 +1094,18 @@ class TradingService:
             return False, "SHORT rule: price must be < MA50"
         if self.settings.auto_trade_entry_confirm_ema_stack and ema20 >= ema50:
             return False, "SHORT rule: EMA20 must be < EMA50"
-        if (
-            self.settings.auto_trade_entry_confirm_macd
-            and macd is not None
-            and macd_signal is not None
-            and macd > macd_signal
-        ):
-            return False, "SHORT rule: MACD must be below signal"
+        if self.settings.auto_trade_entry_confirm_macd:
+            if (
+                self.settings.auto_trade_entry_require_macd_data
+                and (macd is None or macd_signal is None)
+            ):
+                return False, "SHORT rule: waiting MACD/signal data"
+            if (
+                macd is not None
+                and macd_signal is not None
+                and macd > macd_signal
+            ):
+                return False, "SHORT rule: MACD must be below signal"
         if rsi < self.settings.short_rsi_min or rsi > self.settings.short_rsi_max:
             return (
                 False,
@@ -2249,6 +2259,7 @@ class TradingService:
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),
                 "entry_confirm_ema_stack": self.settings.auto_trade_entry_confirm_ema_stack,
                 "entry_confirm_macd": self.settings.auto_trade_entry_confirm_macd,
+                "entry_require_macd_data": self.settings.auto_trade_entry_require_macd_data,
                 "min_volume_ratio": round(self.settings.auto_trade_min_volume_ratio, 4),
                 "min_strength_confidence": self.settings.auto_trade_min_strength_confidence,
                 "session_filter_enabled": self.settings.auto_trade_session_filter_enabled,

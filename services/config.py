@@ -232,6 +232,7 @@ class Settings:
     short_rsi_max: float
     auto_trade_entry_confirm_ema_stack: bool
     auto_trade_entry_confirm_macd: bool
+    auto_trade_entry_require_macd_data: bool
     auto_trade_min_volume_ratio: float
     auto_trade_min_strength_confidence: int
     auto_trade_session_filter_enabled: bool
@@ -464,6 +465,10 @@ def load_settings() -> Settings:
     )
     auto_trade_entry_confirm_macd = parse_env_bool(
         os.getenv("AUTO_TRADE_ENTRY_CONFIRM_MACD"),
+        True,
+    )
+    auto_trade_entry_require_macd_data = parse_env_bool(
+        os.getenv("AUTO_TRADE_ENTRY_REQUIRE_MACD_DATA"),
         True,
     )
     auto_trade_min_volume_ratio = max(
@@ -736,6 +741,7 @@ def load_settings() -> Settings:
         short_rsi_max=short_rsi_max,
         auto_trade_entry_confirm_ema_stack=auto_trade_entry_confirm_ema_stack,
         auto_trade_entry_confirm_macd=auto_trade_entry_confirm_macd,
+        auto_trade_entry_require_macd_data=auto_trade_entry_require_macd_data,
         auto_trade_min_volume_ratio=auto_trade_min_volume_ratio,
         auto_trade_min_strength_confidence=auto_trade_min_strength_confidence,
         auto_trade_session_filter_enabled=auto_trade_session_filter_enabled,
