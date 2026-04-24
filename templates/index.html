@@ -145,6 +145,51 @@
       gap: 10px;
     }
 
+    .view-nav {
+      position: sticky;
+      top: 8px;
+      z-index: 12;
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      backdrop-filter: blur(4px);
+    }
+
+    .view-nav-head {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.3px;
+      font-weight: 700;
+    }
+
+    .view-nav-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .view-tab-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.2px;
+    }
+
+    .view-tab-btn.active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #041024;
+    }
+
+    .view-group-hidden {
+      display: none !important;
+    }
+
     .ctrl {
       display: flex;
       flex-direction: column;
@@ -934,6 +979,10 @@
         max-height: 400px;
       }
 
+      .view-nav {
+        position: static;
+      }
+
       .tools-grid {
         grid-template-columns: 1fr;
       }
@@ -1037,7 +1086,17 @@
       </div>
     </section>
 
-    <section class="stats">
+    <section class="panel view-nav">
+      <div class="view-nav-head">Quick View</div>
+      <div class="view-nav-tabs">
+        <button id="view-tab-overview" class="view-tab-btn active" data-view-mode="overview" type="button">Overview</button>
+        <button id="view-tab-signals" class="view-tab-btn" data-view-mode="signals" type="button">Signals</button>
+        <button id="view-tab-trading" class="view-tab-btn" data-view-mode="trading" type="button">Trading</button>
+        <button id="view-tab-all" class="view-tab-btn" data-view-mode="all" type="button">All</button>
+      </div>
+    </section>
+
+    <section class="stats" data-view-group="overview">
       <article class="stat"><span class="label">Symbol</span><span class="value" id="stat-symbol">-</span></article>
       <article class="stat"><span class="label">Price</span><span class="value" id="stat-price">-</span></article>
       <article class="stat"><span class="label">24h Change</span><span class="value" id="stat-change">-</span></article>
@@ -1047,7 +1106,7 @@
       <article class="stat"><span class="label">Signal Strength</span><span class="value" id="stat-strength">-</span></article>
     </section>
 
-    <section class="movers-grid">
+    <section class="movers-grid" data-view-group="overview">
       <article class="mover-col">
         <h3 class="mover-head">Top Gainers (24h)</h3>
         <div class="mover-list" id="movers-gainers">
@@ -1068,7 +1127,7 @@
       </article>
     </section>
 
-    <section class="main-grid">
+    <section class="main-grid" data-view-group="overview">
       <section class="panel chart-stack">
         <div class="price-chart-wrap">
           <div id="price-chart"></div>
@@ -1126,7 +1185,7 @@
       </section>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-view-group="overview">
       <div class="orderflow-head">
         <h3 class="tool-title">Order Book + Recent Trades (<span id="orderflow-symbol">-</span>)</h3>
         <div class="orderflow-meta" id="orderflow-meta">Spread: -</div>
@@ -1192,7 +1251,7 @@
       </div>
     </section>
 
-    <section class="tools-grid">
+    <section class="tools-grid" data-view-group="signals">
       <section class="panel">
         <h3 class="tool-title">Execution Checklist (Live)</h3>
         <div class="risk-results">
@@ -1229,7 +1288,7 @@
       </section>
     </section>
 
-    <section class="tools-grid">
+    <section class="tools-grid" data-view-group="signals">
       <section class="panel">
         <h3 class="tool-title">Alert Builder (EMA/RSI/Breakout)</h3>
         <div class="builder-grid">
@@ -1333,7 +1392,7 @@
       </section>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-view-group="signals">
       <h3 class="tool-title">Gate Fail Analytics (Live)</h3>
       <div class="risk-results">
         <article class="result-box"><span class="k">Tracked Symbols</span><span class="v" id="gate-out-tracked">-</span></article>
@@ -1351,7 +1410,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-view-group="trading">
       <h3 class="tool-title">Wallet (Spot)</h3>
       <div class="orderflow-error" id="wallet-error">Wallet data unavailable.</div>
       <div class="wallet-grid">
@@ -1381,7 +1440,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-view-group="trading">
       <h3 class="tool-title">Auto Trade Engine</h3>
       <div class="auto-trade-grid">
         <article class="auto-box"><span class="k">Status</span><span class="v" id="auto-trade-status">Disabled</span></article>

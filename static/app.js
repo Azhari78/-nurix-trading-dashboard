@@ -8,6 +8,8 @@ const streamBannerText = document.getElementById("stream-banner-text");
 const symbolSelect = document.getElementById("symbol-select");
 const watchlistBody = document.getElementById("watchlist-body");
 const timeframeButtons = Array.from(document.querySelectorAll(".time-btn"));
+const viewTabButtons = Array.from(document.querySelectorAll(".view-tab-btn"));
+const viewGroupSections = Array.from(document.querySelectorAll("[data-view-group]"));
 
 const statSymbol = document.getElementById("stat-symbol");
 const statPrice = document.getElementById("stat-price");
@@ -195,6 +197,7 @@ const chartDisplaySettings = {
   showTrend: true,
   showMiniTape: true,
 };
+let dashboardViewMode = "overview";
 
 let priceChart;
 let rsiChart;
@@ -221,6 +224,7 @@ let macdSignalSeries;
 let macdHistogramSeries;
 
 let latestStructure = null;
+const DASHBOARD_VIEW_MODE_KEY = "nurix.dashboard.view.mode.v1";
 const ALERT_BUILDER_RULES_KEY = "nurix.alert.builder.rules.v1";
 const CHART_PRESETS_KEY = "nurix.chart.presets.v1";
 const ALERT_BUILDER_RULE_OPTIONS = {
@@ -321,6 +325,23 @@ function loadStoredObject(key, fallback) {
 function saveStoredObject(key, value) {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // best effort only
+  }
+}
+
+function loadStoredString(key, fallback = "") {
+  try {
+    const value = window.localStorage.getItem(key);
+    return typeof value === "string" && value.trim() ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveStoredString(key, value) {
+  try {
+    window.localStorage.setItem(key, String(value ?? ""));
   } catch {
     // best effort only
   }
@@ -437,6 +458,29 @@ function setActiveTimeframeButton(timeframe) {
     const active = button.dataset.timeframe === timeframe;
     button.classList.toggle("active", active);
   });
+}
+
+function applyDashboardViewMode(mode) {
+  const normalized = ["overview", "signals", "trading", "all"].includes(String(mode))
+    ? String(mode)
+    : "overview";
+  dashboardViewMode = normalized;
+
+  viewTabButtons.forEach((button) => {
+    const active = button.dataset.viewMode === normalized;
+    button.classList.toggle("active", active);
+  });
+
+  viewGroupSections.forEach((section) => {
+    const group = String(section.dataset.viewGroup || "");
+    const visible = normalized === "all" || group === normalized;
+    section.classList.toggle("view-group-hidden", !visible);
+  });
+}
+
+function initDashboardViewMode() {
+  const storedMode = loadStoredString(DASHBOARD_VIEW_MODE_KEY, "overview");
+  applyDashboardViewMode(storedMode);
 }
 
 function syncSymbolOptions(symbols) {
@@ -3776,6 +3820,14 @@ function connectWebSocket() {
   };
 }
 
+viewTabButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const mode = String(button.dataset.viewMode || "overview");
+    applyDashboardViewMode(mode);
+    saveStoredString(DASHBOARD_VIEW_MODE_KEY, mode);
+  });
+});
+
 symbolSelect.addEventListener("change", () => {
   if (replayState.active) resetReplayMode();
   selectedSymbol = symbolSelect.value;
@@ -3986,6 +4038,7 @@ if (exportJournalCsvBtn) {
 }
 
 try {
+  initDashboardViewMode();
   hydrateBuilderRulesFromStorage();
   updateBuilderConditionOptions();
   renderBuilderRules();
