@@ -253,6 +253,7 @@ class Settings:
     short_take_profit_pct: float
     short_trailing_pct: float
     auto_trade_take_profit_run_enabled: bool
+    auto_trade_take_profit_run_min_pnl_pct: float
     auto_trade_partial_take_profit_enabled: bool
     auto_trade_partial_take_profit_pct: float
     auto_trade_partial_take_profit_ratio: float
@@ -523,6 +524,10 @@ def load_settings() -> Settings:
         os.getenv("AUTO_TRADE_TP_AND_RUN_ENABLED"),
         False,
     )
+    auto_trade_take_profit_run_min_pnl_pct = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_TP_AND_RUN_MIN_PNL_PCT"), 0.0), 0.0),
+        100.0,
+    )
 
     auto_trade_partial_take_profit_enabled = parse_env_bool(
         os.getenv("AUTO_TRADE_PARTIAL_TP_ENABLED"),
@@ -752,6 +757,7 @@ def load_settings() -> Settings:
         short_take_profit_pct=short_take_profit_pct,
         short_trailing_pct=short_trailing_pct,
         auto_trade_take_profit_run_enabled=auto_trade_take_profit_run_enabled,
+        auto_trade_take_profit_run_min_pnl_pct=auto_trade_take_profit_run_min_pnl_pct,
         auto_trade_partial_take_profit_enabled=auto_trade_partial_take_profit_enabled,
         auto_trade_partial_take_profit_pct=auto_trade_partial_take_profit_pct,
         auto_trade_partial_take_profit_ratio=auto_trade_partial_take_profit_ratio,

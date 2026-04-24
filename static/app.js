@@ -249,6 +249,16 @@ function fmtMoney(value) {
   }).format(Number(value));
 }
 
+function fmtPnlUsdt(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  const num = Number(value);
+  const abs = Math.abs(num);
+  if (abs < 1e-9) return "0.00 USDT";
+  if (abs >= 1) return `${num.toFixed(2)} USDT`;
+  if (abs >= 0.01) return `${num.toFixed(4)} USDT`;
+  return `${num.toFixed(6)} USDT`;
+}
+
 function fmtQty(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const num = Number(value);
@@ -948,6 +958,9 @@ function drawPositionGuides(autoTrade) {
     ? Number(autoTrade.short_take_profit_pct)
     : Number(autoTrade.long_take_profit_pct);
   const takeProfitRunEnabled = Boolean(autoTrade.take_profit_run_enabled);
+  const takeProfitRunMinPct = Number(autoTrade.take_profit_run_min_pnl_pct);
+  const partialTakeProfitEnabled = Boolean(autoTrade.partial_take_profit_enabled);
+  const partialTakeProfitPct = Number(autoTrade.partial_take_profit_pct);
   const breakEvenEnabled = Boolean(autoTrade.break_even_enabled);
   const breakEvenArmed = Boolean(position.break_even_armed);
   const breakEvenBufferPct = Number(autoTrade.break_even_buffer_pct);
@@ -959,11 +972,40 @@ function drawPositionGuides(autoTrade) {
       : entryPrice * (1 - stopPct / 100);
     addChartPriceLine(stopPrice, "SL", "#ef4444", 0);
   }
-  if (!takeProfitRunEnabled && Number.isFinite(takePct) && takePct > 0) {
+  if (takeProfitRunEnabled && Number.isFinite(takeProfitRunMinPct) && takeProfitRunMinPct > 0) {
+    const tpRunPrice = side === "SHORT"
+      ? entryPrice * (1 - takeProfitRunMinPct / 100)
+      : entryPrice * (1 + takeProfitRunMinPct / 100);
+    addChartPriceLine(tpRunPrice, "TP1", "#16a34a", 0);
+  }
+  const showPartialTpLine = (
+    !takeProfitRunEnabled
+    && partialTakeProfitEnabled
+    && Number.isFinite(partialTakeProfitPct)
+    && partialTakeProfitPct > 0
+    && (!Number.isFinite(takePct) || takePct > partialTakeProfitPct)
+  );
+  if (showPartialTpLine) {
+    const partialTpPrice = side === "SHORT"
+      ? entryPrice * (1 - partialTakeProfitPct / 100)
+      : entryPrice * (1 + partialTakeProfitPct / 100);
+    addChartPriceLine(partialTpPrice, "TP1", "#16a34a", 0);
+  }
+  const showTakeProfitLine = (
+    Number.isFinite(takePct)
+    && takePct > 0
+    && (
+      !takeProfitRunEnabled
+      || !Number.isFinite(takeProfitRunMinPct)
+      || takePct > takeProfitRunMinPct
+    )
+  );
+  if (showTakeProfitLine) {
     const takePrice = side === "SHORT"
       ? entryPrice * (1 - takePct / 100)
       : entryPrice * (1 + takePct / 100);
-    addChartPriceLine(takePrice, "TP", "#22c55e", 0);
+    const takeLineLabel = (takeProfitRunEnabled || showPartialTpLine) ? "TP2" : "TP";
+    addChartPriceLine(takePrice, takeLineLabel, "#22c55e", 0);
   }
   if (breakEvenEnabled && breakEvenArmed && Number.isFinite(breakEvenBufferPct)) {
     const bePrice = side === "SHORT"
@@ -1798,7 +1840,7 @@ function renderTradeJournalRows(entries) {
       const price = fmtPrice(entry.price);
       const qty = fmtQty(entry.amount);
       const notional = entry.notional_usdt == null ? "-" : fmtMoney(entry.notional_usdt);
-      const pnl = entry.pnl_usdt == null ? "-" : `${fmtNumber(entry.pnl_usdt, 2)} USDT`;
+      const pnl = fmtPnlUsdt(entry.pnl_usdt);
       const reason = escapeHtml(entry.reason || "-");
 
       return `
@@ -1883,6 +1925,13 @@ function renderAutoTrade(payload) {
   const minNotionalUsdt = Number(data.min_notional_usdt);
   const strategyModeRaw = String(data.strategy_mode || "long_only");
   const shortEnabled = Boolean(data.short_enabled);
+  const takeProfitRunEnabled = Boolean(data.take_profit_run_enabled);
+  const takeProfitRunMinPnlPct = Number(data.take_profit_run_min_pnl_pct);
+  const partialTakeProfitEnabled = Boolean(data.partial_take_profit_enabled);
+  const partialTakeProfitPct = Number(data.partial_take_profit_pct);
+  const partialTakeProfitRatio = Number(data.partial_take_profit_ratio);
+  const longTakeProfitPct = Number(data.long_take_profit_pct);
+  const shortTakeProfitPct = Number(data.short_take_profit_pct);
   const aiFilterEnabled = Boolean(data.ai_filter_enabled);
   const aiFilterMinConfidence = Number(data.ai_filter_min_confidence);
   const aiFilterMinScoreAbs = Number(data.ai_filter_min_score_abs);
@@ -1972,12 +2021,35 @@ function renderAutoTrade(payload) {
       : "Auto USDT OFF";
     const lossesText = `Losing Streak ${Number.isNaN(consecutiveLosses) ? 0 : consecutiveLosses}`;
     const shortText = shortEnabled ? "SHORT ON" : "SHORT OFF";
+    const sameTpTarget = (
+      Number.isFinite(longTakeProfitPct)
+      && Number.isFinite(shortTakeProfitPct)
+      && Math.abs(longTakeProfitPct - shortTakeProfitPct) < 1e-9
+    );
+    const tpTargetText = sameTpTarget
+      ? `>=${fmtNumber(longTakeProfitPct, 2)}%`
+      : `L>=${Number.isFinite(longTakeProfitPct) ? fmtNumber(longTakeProfitPct, 2) : "-"}%/S>=${Number.isFinite(shortTakeProfitPct) ? fmtNumber(shortTakeProfitPct, 2) : "-"}%`;
+    const tpRunMinText = Number.isNaN(takeProfitRunMinPnlPct)
+      ? "-"
+      : `>=${fmtNumber(takeProfitRunMinPnlPct, 2)}%`;
+    const partialTpText = (
+      Number.isNaN(partialTakeProfitPct) || Number.isNaN(partialTakeProfitRatio)
+    )
+      ? "-"
+      : `${fmtNumber(partialTakeProfitPct, 2)}% x${fmtNumber(partialTakeProfitRatio * 100, 0)}%`;
+    const tpRunText = takeProfitRunEnabled
+      ? `TP1 ${tpRunMinText} (<TP2) • TP2 ${tpTargetText}`
+      : (
+        partialTakeProfitEnabled
+          ? `TP1 ${partialTpText} (partial) • TP2 ${tpTargetText}`
+          : "TP-RUN OFF"
+      );
     const openText = Number.isNaN(maxOpenPositions)
       ? `${openPositions}`
       : maxOpenPositions <= 0
         ? `${openPositions}/Unlimited`
         : `${openPositions}/${maxOpenPositions}`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${lossesText} • Open ${openText}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${tpRunText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${lossesText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
@@ -2037,7 +2109,7 @@ function renderAutoTrade(payload) {
           const symbol = escapeHtml(event.symbol || "-");
           const action = escapeHtml(event.action || "-");
           const message = escapeHtml(event.message || "-");
-          const pnl = event.pnl_usdt == null ? "-" : `${fmtNumber(event.pnl_usdt, 2)} USDT`;
+          const pnl = fmtPnlUsdt(event.pnl_usdt);
           const mode = escapeHtml(String(event.mode || "-").toUpperCase());
           return `
             <tr>
@@ -2066,7 +2138,7 @@ function renderAutoTrade(payload) {
           const follower = escapeHtml(event.follower || "-");
           const symbol = escapeHtml(event.symbol || "-");
           const action = escapeHtml(event.event_type || "-");
-          const pnl = event.pnl_usdt == null ? "-" : `${fmtNumber(event.pnl_usdt, 2)} USDT`;
+          const pnl = fmtPnlUsdt(event.pnl_usdt);
           return `
             <tr>
               <td>${ts}</td>

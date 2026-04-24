@@ -353,6 +353,21 @@ class TradingService:
             return ((entry_price - current_price) / entry_price) * 100
         return ((current_price - entry_price) / entry_price) * 100
 
+    @staticmethod
+    def _fmt_usdt(value: float, *, signed: bool = False) -> str:
+        number = float(value)
+        abs_number = abs(number)
+        if abs_number < 1e-9:
+            decimals = 2
+        elif abs_number >= 1:
+            decimals = 2
+        elif abs_number >= 0.01:
+            decimals = 4
+        else:
+            decimals = 6
+        sign_flag = "+" if signed else ""
+        return f"{number:{sign_flag}.{decimals}f}"
+
     def _record_journal(
         self,
         *,
@@ -693,10 +708,10 @@ class TradingService:
             return
 
         message = (
-            f"UTC {recap_day} • PnL {daily_pnl:+.2f} USDT • Trades {trade_count} • "
-            f"Win {win_rate_pct:.1f}% ({wins}W/{losses}L) • "
-            f"Avg Win {avg_win:.2f} • Avg Loss {avg_loss:.2f} • "
-            f"Top {top_symbol} ({top_symbol_pnl:+.2f}) • Halt: {halt_text}"
+            f"UTC {recap_day} • PnL {self._fmt_usdt(daily_pnl, signed=True)} USDT • "
+            f"Trades {trade_count} • Win {win_rate_pct:.1f}% ({wins}W/{losses}L) • "
+            f"Avg Win {self._fmt_usdt(avg_win)} • Avg Loss {self._fmt_usdt(avg_loss)} • "
+            f"Top {top_symbol} ({self._fmt_usdt(top_symbol_pnl, signed=True)}) • Halt: {halt_text}"
         )
 
         self.alerts.emit_alert(
@@ -1204,10 +1219,16 @@ class TradingService:
 
         if pnl_pct <= -stop_loss_pct:
             return "STOP LOSS", pnl_pct
-        if self.settings.auto_trade_take_profit_run_enabled and pnl_pct > 0:
-            return "TAKE PROFIT AND RUN", pnl_pct
+        tp_run_min_pnl_pct = max(0.0, self.settings.auto_trade_take_profit_run_min_pnl_pct)
         if pnl_pct >= take_profit_pct:
             return "TAKE PROFIT", pnl_pct
+        if (
+            self.settings.auto_trade_take_profit_run_enabled
+            and pnl_pct > 0
+            and pnl_pct >= tp_run_min_pnl_pct
+            and pnl_pct < take_profit_pct
+        ):
+            return "TAKE PROFIT AND RUN", pnl_pct
         if (
             self.settings.auto_trade_break_even_enabled
             and bool(position.get("break_even_armed"))
@@ -1606,6 +1627,12 @@ class TradingService:
                             realized_price,
                             realized_amount,
                         )
+                        notional_before_close = max(
+                            0.0,
+                            safe_float(position.get("notional_usdt")) or (entry_price * amount),
+                        )
+                        close_ratio = self._clamp(realized_amount / amount, 0.0, 1.0)
+                        closed_notional = notional_before_close * close_ratio
                         self.state.auto_trade_daily_pnl[day_key] += realized_pnl
                         self._paper_wallet_on_close(
                             position=position,
@@ -1629,10 +1656,16 @@ class TradingService:
                             reason="PARTIAL TAKE PROFIT",
                             pnl_usdt=realized_pnl,
                             pnl_pct=realized_pnl_pct,
-                            notional_usdt=safe_float(position.get("notional_usdt")),
+                            notional_usdt=closed_notional,
                             price=realized_price,
                             amount=realized_amount,
-                            metadata={"remaining_amount": round(position["amount"], 8)},
+                            metadata={
+                                "remaining_amount": round(position["amount"], 8),
+                                "remaining_notional_usdt": round(
+                                    max(0.0, notional_before_close - closed_notional),
+                                    4,
+                                ),
+                            },
                         )
                         self._copy_trade_on_exit(
                             symbol=symbol,
@@ -1647,7 +1680,7 @@ class TradingService:
                             symbol,
                             "PARTIAL_EXIT",
                             f"{exit_side.upper()} ({position_side} PARTIAL)",
-                            f"Partial TP hit • PnL {realized_pnl:.2f} USDT",
+                            f"Partial TP hit • PnL {self._fmt_usdt(realized_pnl)} USDT",
                             price=realized_price,
                             amount=realized_amount,
                             pnl_usdt=realized_pnl,
@@ -1657,7 +1690,7 @@ class TradingService:
                             symbol=symbol,
                             alert_type="auto_trade_partial_exit",
                             title=f"{symbol} auto {position_side} PARTIAL EXIT",
-                            message=f"Partial TP • PnL {realized_pnl:.2f} USDT",
+                            message=f"Partial TP • PnL {self._fmt_usdt(realized_pnl)} USDT",
                             severity="medium",
                             meta={
                                 "event": "PARTIAL_EXIT",
@@ -1716,6 +1749,12 @@ class TradingService:
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 exit_price = safe_float(order_result.get("average")) or current_price
                 pnl_usdt = self._pnl_usdt(position_side, entry_price, exit_price, filled_amount)
+                notional_before_close = max(
+                    0.0,
+                    safe_float(position.get("notional_usdt")) or (entry_price * amount),
+                )
+                close_ratio = self._clamp(filled_amount / amount, 0.0, 1.0)
+                closed_notional = notional_before_close * close_ratio
                 self.state.auto_trade_daily_pnl[day_key] += pnl_usdt
                 self._paper_wallet_on_close(
                     position=position,
@@ -1738,7 +1777,7 @@ class TradingService:
                     reason=reason,
                     pnl_usdt=pnl_usdt,
                     pnl_pct=self._pnl_pct(entry_price, exit_price, position_side),
-                    notional_usdt=safe_float(position.get("notional_usdt")),
+                    notional_usdt=closed_notional,
                     price=exit_price,
                     amount=filled_amount,
                 )
@@ -1756,7 +1795,7 @@ class TradingService:
                     symbol,
                     "EXIT",
                     f"{exit_side.upper()} ({position_side} EXIT)",
-                    f"{reason} • PnL {pnl_usdt:.2f} USDT",
+                    f"{reason} • PnL {self._fmt_usdt(pnl_usdt)} USDT",
                     price=exit_price,
                     amount=filled_amount,
                     pnl_usdt=pnl_usdt,
@@ -1766,7 +1805,7 @@ class TradingService:
                     symbol=symbol,
                     alert_type="auto_trade_exit",
                     title=f"{symbol} auto {position_side} EXIT executed",
-                    message=f"{reason} • PnL {pnl_usdt:.2f} USDT",
+                    message=f"{reason} • PnL {self._fmt_usdt(pnl_usdt)} USDT",
                     severity=("medium" if pnl_usdt >= 0 else "high"),
                     meta={
                         "event": "EXIT",
@@ -2201,6 +2240,10 @@ class TradingService:
                 "short_take_profit_pct": round(self.settings.short_take_profit_pct, 2),
                 "short_trailing_pct": round(self.settings.short_trailing_pct, 2),
                 "take_profit_run_enabled": self.settings.auto_trade_take_profit_run_enabled,
+                "take_profit_run_min_pnl_pct": round(
+                    self.settings.auto_trade_take_profit_run_min_pnl_pct,
+                    4,
+                ),
                 "ai_filter_enabled": self.settings.ai_filter_enabled,
                 "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),

@@ -110,7 +110,7 @@ services:
       - key: LONG_STOP_LOSS_PCT
         value: "2.2"
       - key: LONG_TAKE_PROFIT_PCT
-        value: "3.5"
+        value: "4.0"
       - key: LONG_TRAILING_PCT
         value: "1.2"
       - key: SHORT_RSI_MIN
@@ -120,15 +120,17 @@ services:
       - key: SHORT_STOP_LOSS_PCT
         value: "2.0"
       - key: SHORT_TAKE_PROFIT_PCT
-        value: "3.2"
+        value: "4.0"
       - key: SHORT_TRAILING_PCT
         value: "1.1"
       - key: AUTO_TRADE_TP_AND_RUN_ENABLED
-        value: "true"
+        value: "false"
+      - key: AUTO_TRADE_TP_AND_RUN_MIN_PNL_PCT
+        value: "2.0"
       - key: AUTO_TRADE_PARTIAL_TP_ENABLED
         value: "true"
       - key: AUTO_TRADE_PARTIAL_TP_PCT
-        value: "1.4"
+        value: "2.0"
       - key: AUTO_TRADE_PARTIAL_TP_RATIO
         value: "0.5"
       - key: AUTO_TRADE_BREAK_EVEN_ENABLED
