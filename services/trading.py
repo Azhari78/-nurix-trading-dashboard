@@ -562,7 +562,7 @@ class TradingService:
         base_conf = self.settings.ai_filter_min_confidence
         if not self.settings.auto_trade_auto_adapt_enabled:
             profile = {
-                "name": "BALANCED",
+                "name": "MIDDLE",
                 "reason": "Auto-adapt disabled",
                 "risk_mult": 1.0,
                 "ai_min_confidence": base_conf,
@@ -605,7 +605,7 @@ class TradingService:
         avg_ai_conf = sum(ai_conf_values) / len(ai_conf_values) if ai_conf_values else 0.0
         loss_streak = self.state.auto_trade_consecutive_losses
 
-        profile_name = "BALANCED"
+        profile_name = "MIDDLE"
         risk_mult = 1.0
         ai_min_conf = base_conf
         cooldown_mult = 1.0
@@ -614,7 +614,7 @@ class TradingService:
             median_atr >= self.settings.auto_trade_auto_adapt_high_atr_pct
             or loss_streak >= max(2, self.settings.auto_trade_max_consecutive_losses - 1)
         ):
-            profile_name = "DEFENSIVE"
+            profile_name = "WEAK"
             risk_mult = self.settings.auto_trade_auto_adapt_risk_off_mult
             ai_min_conf = min(100, base_conf + self.settings.auto_trade_auto_adapt_conf_step)
             cooldown_mult = self.settings.auto_trade_auto_adapt_cooldown_off_mult
@@ -623,7 +623,7 @@ class TradingService:
             and avg_ai_conf >= max(40, base_conf)
             and loss_streak == 0
         ):
-            profile_name = "AGGRESSIVE"
+            profile_name = "STRONG"
             risk_mult = self.settings.auto_trade_auto_adapt_risk_on_mult
             ai_min_conf = max(0, base_conf - self.settings.auto_trade_auto_adapt_conf_step)
             cooldown_mult = self.settings.auto_trade_auto_adapt_cooldown_on_mult

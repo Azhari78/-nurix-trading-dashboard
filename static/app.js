@@ -3319,7 +3319,7 @@ function renderAutoTrade(payload) {
   const recentJournal = Array.isArray(data.recent_journal) ? data.recent_journal : [];
   const lastReason = String(data.last_reason || "-");
   const adaptiveEnabled = Boolean(data.adaptive_enabled);
-  const adaptiveProfile = String(data.adaptive_profile || "BALANCED");
+  const adaptiveProfile = String(data.adaptive_profile || "MIDDLE");
   const adaptiveReason = String(data.adaptive_reason || "");
   const adaptiveAiMinConfidence = Number(data.adaptive_ai_min_confidence);
   const adaptiveRiskMultiplier = Number(data.adaptive_risk_multiplier);
