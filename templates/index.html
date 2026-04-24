@@ -152,7 +152,7 @@
       display: grid;
       gap: 8px;
       padding: 10px;
-      backdrop-filter: blur(4px);
+      backdrop-filter: none;
     }
 
     .view-nav-head {
@@ -471,7 +471,8 @@
       flex-wrap: wrap;
       gap: 6px;
       pointer-events: none;
-      max-width: 48%;
+      width: calc(50% - 12px);
+      max-width: calc(50% - 12px);
     }
 
     .chart-overlay-chip {
@@ -483,7 +484,10 @@
       font-size: 11px;
       line-height: 1.1;
       letter-spacing: 0.2px;
-      backdrop-filter: blur(2px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .chart-overlay-chip.pos {
@@ -557,7 +561,8 @@
       justify-content: flex-end;
       gap: 6px;
       pointer-events: none;
-      max-width: 48%;
+      width: calc(50% - 12px);
+      max-width: calc(50% - 12px);
     }
 
     .mtf-chip {
@@ -569,8 +574,11 @@
       font-size: 11px;
       line-height: 1.1;
       letter-spacing: 0.2px;
-      backdrop-filter: blur(2px);
       font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .mtf-chip.mtf-buy {
@@ -733,6 +741,14 @@
       align-items: start;
     }
 
+    .tools-grid-balanced {
+      align-items: stretch;
+    }
+
+    .tools-grid-balanced > .panel {
+      height: 100%;
+    }
+
     .tool-title {
       margin: 0 0 10px;
       font-size: 14px;
@@ -823,6 +839,22 @@
       display: grid;
       gap: 8px;
       padding-right: 2px;
+    }
+
+    .signals-alert-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .signals-alert-panel .alerts-list {
+      flex: 1;
+      min-height: 220px;
+      max-height: none;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px;
+      background: #0d1730;
     }
 
     .alert-item {
@@ -1048,6 +1080,7 @@
 
       .chart-overlay,
       .chart-mtf-ribbon {
+        width: calc(100% - 16px);
         max-width: 100%;
       }
 
@@ -1261,7 +1294,7 @@
       </div>
     </section>
 
-    <section class="tools-grid" data-view-group="signals">
+    <section class="tools-grid tools-grid-balanced" data-view-group="signals">
       <section class="panel">
         <h3 class="tool-title">Execution Checklist (Live)</h3>
         <div class="risk-results">
@@ -1282,7 +1315,7 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel signals-alert-panel">
         <h3 class="tool-title">Alert Center <span id="alert-count">(0)</span></h3>
         <div class="alert-controls">
           <button id="toggle-sound" class="toggle-btn active" type="button">Sound ON</button>
