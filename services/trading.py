@@ -827,7 +827,12 @@ class TradingService:
             )
         return False, ""
 
-    def _execution_cost_gate_allows(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+    def _execution_cost_gate_allows(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str = "MIDDLE",
+    ) -> tuple[bool, str]:
         if not self.settings.auto_trade_execution_cost_gate_enabled:
             return True, ""
 
@@ -844,7 +849,7 @@ class TradingService:
                 ),
             )
 
-        _, take_profit_pct, _ = self._side_stop_take_trail(side)
+        _, take_profit_pct, _ = self._side_stop_take_trail(side, profile_name)
         total_cost_pct = (
             max(0.0, spread_pct or 0.0)
             + self.settings.auto_trade_estimated_fee_pct
@@ -862,7 +867,12 @@ class TradingService:
 
         return True, ""
 
-    def _entry_rank_score(self, row: dict[str, Any], side: str) -> float:
+    def _entry_rank_score(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str = "MIDDLE",
+    ) -> float:
         ai_confidence = safe_float(row.get("ai_confidence")) or 0.0
         ai_score_abs = abs(safe_float(row.get("ai_score")) or 0.0)
         strength_confidence = safe_float(row.get("strength_confidence")) or 0.0
@@ -888,12 +898,7 @@ class TradingService:
             score -= max(0.0, spread_pct) * 120.0
 
         if rsi is not None:
-            if side == "SHORT":
-                band_min = self.settings.short_rsi_min
-                band_max = self.settings.short_rsi_max
-            else:
-                band_min = self.settings.long_rsi_min
-                band_max = self.settings.long_rsi_max
+            band_min, band_max = self._rsi_band_for_profile(side, profile_name)
             band_mid = (band_min + band_max) / 2.0
             band_half = max(1.0, (band_max - band_min) / 2.0)
             rsi_fit = max(0.0, 1.0 - abs(rsi - band_mid) / band_half)
@@ -1063,6 +1068,38 @@ class TradingService:
         fallback_slow = safe_float(row.get("ema50"))
         return fallback_fast, fallback_slow, 20, 50
 
+    def _rsi_band_for_profile(self, side: str, profile_name: str) -> tuple[float, float]:
+        if side == "SHORT":
+            band_min = float(self.settings.short_rsi_min)
+            band_max = float(self.settings.short_rsi_max)
+        else:
+            band_min = float(self.settings.long_rsi_min)
+            band_max = float(self.settings.long_rsi_max)
+
+        normalized = self._normalize_profile_name(profile_name)
+        if normalized == "WEAK":
+            band_min += 2.0
+            band_max -= 2.0
+        elif normalized == "STRONG":
+            band_min -= 3.0
+            band_max += 3.0
+
+        band_min = self._clamp(band_min, 0.0, 100.0)
+        band_max = self._clamp(band_max, 0.0, 100.0)
+        if band_max < band_min:
+            band_mid = (band_min + band_max) / 2.0
+            band_min = band_mid
+            band_max = band_mid
+        return band_min, band_max
+
+    def _exit_multipliers_for_profile(self, profile_name: str) -> tuple[float, float, float]:
+        normalized = self._normalize_profile_name(profile_name)
+        if normalized == "WEAK":
+            return 0.9, 0.8, 0.85
+        if normalized == "STRONG":
+            return 1.1, 1.2, 1.15
+        return 1.0, 1.0, 1.0
+
     def _strategy_allows(self, side: str) -> bool:
         mode = self.settings.auto_trade_strategy_mode
         if mode == "long_only":
@@ -1113,6 +1150,8 @@ class TradingService:
                 ),
             )
 
+        band_min, band_max = self._rsi_band_for_profile(side, profile_name)
+
         if side == "LONG":
             if price <= ema_slow:
                 return False, f"LONG rule: price must be > EMA{ema_slow_span}"
@@ -1130,12 +1169,12 @@ class TradingService:
                     and macd < macd_signal
                 ):
                     return False, "LONG rule: MACD must be above signal"
-            if rsi < self.settings.long_rsi_min or rsi > self.settings.long_rsi_max:
+            if rsi < band_min or rsi > band_max:
                 return (
                     False,
                     (
                         f"LONG rule: RSI {rsi:.2f} outside "
-                        f"{self.settings.long_rsi_min:.0f}-{self.settings.long_rsi_max:.0f}"
+                        f"{band_min:.0f}-{band_max:.0f}"
                     ),
                 )
             return True, ""
@@ -1156,12 +1195,12 @@ class TradingService:
                 and macd > macd_signal
             ):
                 return False, "SHORT rule: MACD must be below signal"
-        if rsi < self.settings.short_rsi_min or rsi > self.settings.short_rsi_max:
+        if rsi < band_min or rsi > band_max:
             return (
                 False,
                 (
                     f"SHORT rule: RSI {rsi:.2f} outside "
-                    f"{self.settings.short_rsi_min:.0f}-{self.settings.short_rsi_max:.0f}"
+                    f"{band_min:.0f}-{band_max:.0f}"
                 ),
             )
         return True, ""
@@ -1243,17 +1282,25 @@ class TradingService:
             return "SHORT", ""
         return "LONG", ""
 
-    def _side_stop_take_trail(self, side: str) -> tuple[float, float, float]:
+    def _side_stop_take_trail(
+        self,
+        side: str,
+        profile_name: str = "MIDDLE",
+    ) -> tuple[float, float, float]:
         if side == "SHORT":
-            return (
-                self.settings.short_stop_loss_pct,
-                self.settings.short_take_profit_pct,
-                self.settings.short_trailing_pct,
-            )
+            stop_loss_pct = float(self.settings.short_stop_loss_pct)
+            take_profit_pct = float(self.settings.short_take_profit_pct)
+            trailing_pct = float(self.settings.short_trailing_pct)
+        else:
+            stop_loss_pct = float(self.settings.long_stop_loss_pct)
+            take_profit_pct = float(self.settings.long_take_profit_pct)
+            trailing_pct = float(self.settings.long_trailing_pct)
+
+        sl_mult, tp_mult, trail_mult = self._exit_multipliers_for_profile(profile_name)
         return (
-            self.settings.long_stop_loss_pct,
-            self.settings.long_take_profit_pct,
-            self.settings.long_trailing_pct,
+            max(0.1, stop_loss_pct * sl_mult),
+            max(0.1, take_profit_pct * tp_mult),
+            max(0.0, trailing_pct * trail_mult),
         )
 
     def get_position_exit_reason(
@@ -1267,7 +1314,11 @@ class TradingService:
             return None, 0.0
 
         position_side = self._normalize_side(position.get("side"))
-        stop_loss_pct, take_profit_pct, trailing_pct = self._side_stop_take_trail(position_side)
+        active_profile_name = self._normalize_profile_name(self.state.auto_trade_adaptive_profile)
+        stop_loss_pct, take_profit_pct, trailing_pct = self._side_stop_take_trail(
+            position_side,
+            active_profile_name,
+        )
 
         if position_side == "SHORT":
             pnl_pct = ((entry_price - current_price) / entry_price) * 100
@@ -2027,7 +2078,14 @@ class TradingService:
                     status_reason = f"{symbol}: {reason_text}"
                     continue
 
-                cost_ok, cost_reason = self._execution_cost_gate_allows(row, entry_side)
+                adaptive_profile_name = self._normalize_profile_name(
+                    adaptive_profile.get("name"),
+                )
+                cost_ok, cost_reason = self._execution_cost_gate_allows(
+                    row,
+                    entry_side,
+                    adaptive_profile_name,
+                )
                 if not cost_ok:
                     status_reason = f"{symbol}: execution cost gate ({cost_reason})"
                     continue
@@ -2054,7 +2112,11 @@ class TradingService:
                         "row": row,
                         "entry_side": entry_side,
                         "reason_text": reason_text,
-                        "rank_score": self._entry_rank_score(row, entry_side),
+                        "rank_score": self._entry_rank_score(
+                            row,
+                            entry_side,
+                            adaptive_profile_name,
+                        ),
                     }
                 )
 
@@ -2284,6 +2346,20 @@ class TradingService:
             adaptive_ema_fast_span, adaptive_ema_slow_span = self._ema_spans_for_profile(
                 adaptive_profile_name,
             )
+            adaptive_long_rsi_min, adaptive_long_rsi_max = self._rsi_band_for_profile(
+                "LONG",
+                adaptive_profile_name,
+            )
+            adaptive_short_rsi_min, adaptive_short_rsi_max = self._rsi_band_for_profile(
+                "SHORT",
+                adaptive_profile_name,
+            )
+            adaptive_long_stop_loss_pct, adaptive_long_take_profit_pct, adaptive_long_trailing_pct = (
+                self._side_stop_take_trail("LONG", adaptive_profile_name)
+            )
+            adaptive_short_stop_loss_pct, adaptive_short_take_profit_pct, adaptive_short_trailing_pct = (
+                self._side_stop_take_trail("SHORT", adaptive_profile_name)
+            )
 
             return {
                 "enabled": self.settings.auto_trade_enabled,
@@ -2302,16 +2378,16 @@ class TradingService:
                 "strategy_mode": self.settings.auto_trade_strategy_mode,
                 "short_enabled": self.settings.auto_trade_enable_short,
                 "max_open_positions": self.settings.auto_trade_max_open_positions,
-                "long_rsi_min": round(self.settings.long_rsi_min, 2),
-                "long_rsi_max": round(self.settings.long_rsi_max, 2),
-                "short_rsi_min": round(self.settings.short_rsi_min, 2),
-                "short_rsi_max": round(self.settings.short_rsi_max, 2),
-                "long_stop_loss_pct": round(self.settings.long_stop_loss_pct, 2),
-                "long_take_profit_pct": round(self.settings.long_take_profit_pct, 2),
-                "long_trailing_pct": round(self.settings.long_trailing_pct, 2),
-                "short_stop_loss_pct": round(self.settings.short_stop_loss_pct, 2),
-                "short_take_profit_pct": round(self.settings.short_take_profit_pct, 2),
-                "short_trailing_pct": round(self.settings.short_trailing_pct, 2),
+                "long_rsi_min": round(adaptive_long_rsi_min, 2),
+                "long_rsi_max": round(adaptive_long_rsi_max, 2),
+                "short_rsi_min": round(adaptive_short_rsi_min, 2),
+                "short_rsi_max": round(adaptive_short_rsi_max, 2),
+                "long_stop_loss_pct": round(adaptive_long_stop_loss_pct, 2),
+                "long_take_profit_pct": round(adaptive_long_take_profit_pct, 2),
+                "long_trailing_pct": round(adaptive_long_trailing_pct, 2),
+                "short_stop_loss_pct": round(adaptive_short_stop_loss_pct, 2),
+                "short_take_profit_pct": round(adaptive_short_take_profit_pct, 2),
+                "short_trailing_pct": round(adaptive_short_trailing_pct, 2),
                 "take_profit_run_enabled": self.settings.auto_trade_take_profit_run_enabled,
                 "take_profit_run_min_pnl_pct": round(
                     self.settings.auto_trade_take_profit_run_min_pnl_pct,
