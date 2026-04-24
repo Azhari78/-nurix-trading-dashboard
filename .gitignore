@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 .vscode/
 .DS_Store
+
+# Runtime persistence file for paper auto-trade state.
+data/auto_trade_state.json
