@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from services.alerts import AlertService
@@ -43,6 +45,212 @@ class TradingService:
                 name,
                 {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
             )
+        self._state_file_path = Path(settings.auto_trade_state_file).expanduser()
+        self._state_save_interval_seconds = max(
+            1,
+            int(settings.auto_trade_state_save_interval_seconds),
+        )
+        self._last_state_save_at = 0.0
+        self._load_persisted_runtime_state()
+
+    def _state_persistence_enabled(self) -> bool:
+        return bool(self.settings.paper_trading and self.settings.paper_wallet_enabled)
+
+    @staticmethod
+    def _float_map(raw_map: Any, *, uppercase_keys: bool = True) -> dict[str, float]:
+        if not isinstance(raw_map, dict):
+            return {}
+        values: dict[str, float] = {}
+        for key_raw, value_raw in raw_map.items():
+            key = str(key_raw or "").strip()
+            if not key:
+                continue
+            if uppercase_keys:
+                key = key.upper()
+            value = safe_float(value_raw)
+            values[key] = float(value) if value is not None else 0.0
+        return values
+
+    def _load_persisted_runtime_state(self) -> None:
+        if not self._state_persistence_enabled():
+            return
+
+        state_path = self._state_file_path
+        if not state_path.is_file():
+            return
+
+        try:
+            with state_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Could not load persisted auto-trade state from %s: %s", state_path, exc)
+            return
+
+        if not isinstance(payload, dict):
+            self.logger.warning("Ignoring persisted auto-trade state in %s: invalid payload", state_path)
+            return
+
+        positions_raw = payload.get("auto_trade_positions")
+        restored_positions: dict[str, dict[str, Any]] = {}
+        if isinstance(positions_raw, dict):
+            for symbol_raw, position_raw in positions_raw.items():
+                symbol = str(symbol_raw or "").strip().upper()
+                if not symbol or not isinstance(position_raw, dict):
+                    continue
+                restored_positions[symbol] = dict(position_raw)
+
+        with self.state.auto_trade_lock:
+            self.state.auto_trade_positions = restored_positions
+            self.state.auto_trade_last_action_ts = self._float_map(
+                payload.get("auto_trade_last_action_ts"),
+                uppercase_keys=True,
+            )
+            self.state.auto_trade_cooldown_until = self._float_map(
+                payload.get("auto_trade_cooldown_until"),
+                uppercase_keys=True,
+            )
+            self.state.auto_trade_daily_pnl = self._float_map(
+                payload.get("auto_trade_daily_pnl"),
+                uppercase_keys=False,
+            )
+            self.state.auto_trade_halt_reason_by_day = {
+                str(key): str(value)
+                for key, value in (payload.get("auto_trade_halt_reason_by_day") or {}).items()
+                if str(key).strip()
+            }
+            self.state.auto_trade_halt_day = (
+                str(payload.get("auto_trade_halt_day")).strip()
+                if payload.get("auto_trade_halt_day") is not None
+                else None
+            ) or None
+            self.state.auto_trade_halt_until = float(safe_float(payload.get("auto_trade_halt_until")) or 0.0)
+            halt_reason = payload.get("auto_trade_halt_reason")
+            self.state.auto_trade_halt_reason = str(halt_reason).strip() if halt_reason else None
+            self.state.auto_trade_last_convert_at = float(
+                safe_float(payload.get("auto_trade_last_convert_at")) or 0.0
+            )
+            self.state.auto_trade_consecutive_losses = max(
+                0,
+                int(safe_float(payload.get("auto_trade_consecutive_losses")) or 0),
+            )
+            stats_by_symbol = payload.get("auto_trade_stats_by_symbol")
+            if isinstance(stats_by_symbol, dict):
+                self.state.auto_trade_stats_by_symbol = {
+                    str(symbol).upper(): dict(stats)
+                    for symbol, stats in stats_by_symbol.items()
+                    if str(symbol).strip() and isinstance(stats, dict)
+                }
+            journal_rows = payload.get("auto_trade_journal")
+            if isinstance(journal_rows, list):
+                self.state.auto_trade_journal.clear()
+                for row in journal_rows[-self.state.auto_trade_journal.maxlen :]:
+                    if isinstance(row, dict):
+                        self.state.auto_trade_journal.append(dict(row))
+
+        with self.state.wallet_lock:
+            paper_wallet = payload.get("paper_wallet")
+            if isinstance(paper_wallet, dict):
+                initialized = bool(paper_wallet.get("initialized", False))
+                if restored_positions:
+                    initialized = True
+                self.state.paper_wallet_initialized = initialized
+                self.state.paper_wallet_free_usdt = max(
+                    0.0,
+                    float(safe_float(paper_wallet.get("free_usdt")) or 0.0),
+                )
+                self.state.paper_wallet_used_usdt = max(
+                    0.0,
+                    float(safe_float(paper_wallet.get("used_usdt")) or 0.0),
+                )
+                self.state.paper_wallet_realized_pnl_usdt = float(
+                    safe_float(paper_wallet.get("realized_pnl_usdt")) or 0.0
+                )
+                day_key = str(paper_wallet.get("day_key") or "").strip()
+                self.state.wallet_day_key = day_key or None
+                day_start_total = safe_float(paper_wallet.get("day_start_total_usdt"))
+                self.state.wallet_day_start_total_usdt = (
+                    float(day_start_total)
+                    if day_start_total is not None and day_start_total >= 0
+                    else None
+                )
+                self.state.wallet_cache["updated_at"] = 0.0
+
+        self.logger.info(
+            "Loaded persisted auto-trade state from %s (positions=%s, journal=%s)",
+            state_path,
+            len(restored_positions),
+            len(self.state.auto_trade_journal),
+        )
+
+    def _build_runtime_state_payload(self) -> dict[str, Any]:
+        with self.state.auto_trade_lock:
+            payload: dict[str, Any] = {
+                "version": 1,
+                "saved_at": int(time.time()),
+                "auto_trade_positions": {
+                    str(symbol): dict(position)
+                    for symbol, position in self.state.auto_trade_positions.items()
+                    if isinstance(position, dict)
+                },
+                "auto_trade_last_action_ts": {
+                    str(symbol): float(value)
+                    for symbol, value in self.state.auto_trade_last_action_ts.items()
+                },
+                "auto_trade_cooldown_until": {
+                    str(symbol): float(value)
+                    for symbol, value in self.state.auto_trade_cooldown_until.items()
+                },
+                "auto_trade_daily_pnl": {
+                    str(day_key): float(value)
+                    for day_key, value in self.state.auto_trade_daily_pnl.items()
+                },
+                "auto_trade_halt_day": self.state.auto_trade_halt_day,
+                "auto_trade_halt_until": float(self.state.auto_trade_halt_until),
+                "auto_trade_halt_reason": self.state.auto_trade_halt_reason,
+                "auto_trade_halt_reason_by_day": dict(self.state.auto_trade_halt_reason_by_day),
+                "auto_trade_last_convert_at": float(self.state.auto_trade_last_convert_at),
+                "auto_trade_consecutive_losses": int(self.state.auto_trade_consecutive_losses),
+                "auto_trade_stats_by_symbol": {
+                    str(symbol): dict(stats)
+                    for symbol, stats in self.state.auto_trade_stats_by_symbol.items()
+                    if isinstance(stats, dict)
+                },
+                "auto_trade_journal": list(self.state.auto_trade_journal),
+            }
+
+        with self.state.wallet_lock:
+            payload["paper_wallet"] = {
+                "initialized": bool(self.state.paper_wallet_initialized),
+                "free_usdt": float(self.state.paper_wallet_free_usdt),
+                "used_usdt": float(self.state.paper_wallet_used_usdt),
+                "realized_pnl_usdt": float(self.state.paper_wallet_realized_pnl_usdt),
+                "day_key": self.state.wallet_day_key,
+                "day_start_total_usdt": self.state.wallet_day_start_total_usdt,
+            }
+
+        return payload
+
+    def persist_runtime_state(self, force: bool = False) -> None:
+        if not self._state_persistence_enabled():
+            return
+
+        now = time.time()
+        if not force and now - self._last_state_save_at < self._state_save_interval_seconds:
+            return
+
+        payload = self._build_runtime_state_payload()
+        state_path = self._state_file_path
+        tmp_path = state_path.with_name(f"{state_path.name}.tmp")
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=True)
+            tmp_path.replace(state_path)
+            self._last_state_save_at = now
+        except Exception as exc:  # noqa: BLE001
+            with suppress(Exception):
+                tmp_path.unlink()
+            self.logger.warning("Failed to persist auto-trade runtime state to %s: %s", state_path, exc)
 
     @staticmethod
     def utc_day_key() -> str:
@@ -996,6 +1204,8 @@ class TradingService:
 
         if pnl_pct <= -stop_loss_pct:
             return "STOP LOSS", pnl_pct
+        if self.settings.auto_trade_take_profit_run_enabled and pnl_pct > 0:
+            return "TAKE PROFIT AND RUN", pnl_pct
         if pnl_pct >= take_profit_pct:
             return "TAKE PROFIT", pnl_pct
         if (
@@ -1373,6 +1583,7 @@ class TradingService:
                 pnl_pct_live = self._pnl_pct(entry_price, current_price, position_side)
                 if (
                     self.settings.auto_trade_partial_take_profit_enabled
+                    and not self.settings.auto_trade_take_profit_run_enabled
                     and not bool(position.get("partial_tp_done"))
                     and pnl_pct_live >= self.settings.auto_trade_partial_take_profit_pct
                     and amount > 0
@@ -1989,6 +2200,7 @@ class TradingService:
                 "short_stop_loss_pct": round(self.settings.short_stop_loss_pct, 2),
                 "short_take_profit_pct": round(self.settings.short_take_profit_pct, 2),
                 "short_trailing_pct": round(self.settings.short_trailing_pct, 2),
+                "take_profit_run_enabled": self.settings.auto_trade_take_profit_run_enabled,
                 "ai_filter_enabled": self.settings.ai_filter_enabled,
                 "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),

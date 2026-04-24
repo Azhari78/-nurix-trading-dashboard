@@ -572,6 +572,7 @@ function setChartOverlayValue(node, text, tone = "") {
 }
 
 function estimateExpectedEdgePct(summary, autoTrade, side) {
+  if (Boolean(autoTrade?.take_profit_run_enabled)) return null;
   const spreadPct = Number(summary?.spread_pct);
   const spreadCostPct = Number.isFinite(spreadPct) ? Math.max(0, spreadPct) : 0;
   const feePct = Number(autoTrade?.estimated_fee_pct);
@@ -946,6 +947,7 @@ function drawPositionGuides(autoTrade) {
   const takePct = side === "SHORT"
     ? Number(autoTrade.short_take_profit_pct)
     : Number(autoTrade.long_take_profit_pct);
+  const takeProfitRunEnabled = Boolean(autoTrade.take_profit_run_enabled);
   const breakEvenEnabled = Boolean(autoTrade.break_even_enabled);
   const breakEvenArmed = Boolean(position.break_even_armed);
   const breakEvenBufferPct = Number(autoTrade.break_even_buffer_pct);
@@ -957,7 +959,7 @@ function drawPositionGuides(autoTrade) {
       : entryPrice * (1 - stopPct / 100);
     addChartPriceLine(stopPrice, "SL", "#ef4444", 0);
   }
-  if (Number.isFinite(takePct) && takePct > 0) {
+  if (!takeProfitRunEnabled && Number.isFinite(takePct) && takePct > 0) {
     const takePrice = side === "SHORT"
       ? entryPrice * (1 - takePct / 100)
       : entryPrice * (1 + takePct / 100);

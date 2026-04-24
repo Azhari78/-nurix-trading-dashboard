@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -46,6 +47,7 @@ class MarketService:
         self._global_rest_error_logged_at = 0.0
         self._runtime_symbols = list(settings.symbols)
         self._symbol_validation_done = False
+        self._engine_cycle_lock = threading.Lock()
 
     @staticmethod
     def utc_day_key() -> str:
@@ -1107,12 +1109,12 @@ class MarketService:
         }
 
     def build_snapshot(self, selected_symbol: str, timeframe: str) -> dict[str, Any]:
-        market_rows = self.build_market_rows()
-        movers = self.build_top_movers(market_rows)
-        wallet = self.build_wallet_payload(market_rows)
-        self.alerts.update_alert_state(market_rows)
-        self.trading.run_auto_trading(market_rows, wallet)
-        recent_alerts = self.alerts.get_recent_alerts(self.settings.alert_recent_count)
+        with self._engine_cycle_lock:
+            market_rows = self.build_market_rows()
+            movers = self.build_top_movers(market_rows)
+            wallet = self.build_wallet_payload(market_rows)
+            self.alerts.update_alert_state(market_rows)
+            recent_alerts = self.alerts.get_recent_alerts(self.settings.alert_recent_count)
 
         symbols_present = [row["symbol"] for row in market_rows if row.get("symbol")]
         if selected_symbol not in symbols_present:
@@ -1187,3 +1189,11 @@ class MarketService:
             "auto_trade": auto_trade,
             "error": snapshot_error,
         }
+
+    def run_background_engine_cycle(self) -> None:
+        with self._engine_cycle_lock:
+            market_rows = self.build_market_rows()
+            wallet = self.build_wallet_payload(market_rows)
+            self.alerts.update_alert_state(market_rows)
+            self.trading.run_auto_trading(market_rows, wallet)
+            self.trading.persist_runtime_state()

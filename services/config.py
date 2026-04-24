@@ -252,6 +252,7 @@ class Settings:
     short_stop_loss_pct: float
     short_take_profit_pct: float
     short_trailing_pct: float
+    auto_trade_take_profit_run_enabled: bool
     auto_trade_partial_take_profit_enabled: bool
     auto_trade_partial_take_profit_pct: float
     auto_trade_partial_take_profit_ratio: float
@@ -297,6 +298,8 @@ class Settings:
     copy_trade_slippage_bps: float
     auto_trade_symbols: list[str]
     auto_trade_symbols_set: set[str]
+    auto_trade_state_file: str
+    auto_trade_state_save_interval_seconds: int
     service_started_at: int
 
 
@@ -516,6 +519,10 @@ def load_settings() -> Settings:
         parse_env_int(os.getenv("AUTO_TRADE_SYMBOL_RANK_TOP_N"), 2),
         1,
     )
+    auto_trade_take_profit_run_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_TP_AND_RUN_ENABLED"),
+        False,
+    )
 
     auto_trade_partial_take_profit_enabled = parse_env_bool(
         os.getenv("AUTO_TRADE_PARTIAL_TP_ENABLED"),
@@ -647,6 +654,13 @@ def load_settings() -> Settings:
         max(parse_env_float(os.getenv("COPY_TRADE_SLIPPAGE_BPS"), 4.0), 0.0),
         50.0,
     )
+    auto_trade_state_file = (os.getenv("AUTO_TRADE_STATE_FILE") or "data/auto_trade_state.json").strip()
+    if not auto_trade_state_file:
+        auto_trade_state_file = "data/auto_trade_state.json"
+    auto_trade_state_save_interval_seconds = max(
+        parse_env_int(os.getenv("AUTO_TRADE_STATE_SAVE_INTERVAL_SECONDS"), 5),
+        1,
+    )
 
     return Settings(
         title="Nurix Trading Dashboard",
@@ -737,6 +751,7 @@ def load_settings() -> Settings:
         short_stop_loss_pct=short_stop_loss_pct,
         short_take_profit_pct=short_take_profit_pct,
         short_trailing_pct=short_trailing_pct,
+        auto_trade_take_profit_run_enabled=auto_trade_take_profit_run_enabled,
         auto_trade_partial_take_profit_enabled=auto_trade_partial_take_profit_enabled,
         auto_trade_partial_take_profit_pct=auto_trade_partial_take_profit_pct,
         auto_trade_partial_take_profit_ratio=auto_trade_partial_take_profit_ratio,
@@ -794,5 +809,7 @@ def load_settings() -> Settings:
         copy_trade_slippage_bps=copy_trade_slippage_bps,
         auto_trade_symbols=auto_trade_symbols,
         auto_trade_symbols_set=set(auto_trade_symbols),
+        auto_trade_state_file=auto_trade_state_file,
+        auto_trade_state_save_interval_seconds=auto_trade_state_save_interval_seconds,
         service_started_at=int(time.time()),
     )

@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any
 
@@ -57,11 +57,42 @@ ws_manager = WebSocketManager(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    engine_interval_seconds = max(1.0, settings.push_interval_seconds)
+
+    async def background_engine_loop() -> None:
+        while True:
+            started_at = time.monotonic()
+            try:
+                await asyncio.to_thread(market.run_background_engine_cycle)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("Background auto-trade engine cycle failed")
+
+            elapsed = time.monotonic() - started_at
+            await asyncio.sleep(max(0.2, engine_interval_seconds - elapsed))
+
     await exchange_stream.start()
     await ws_manager.start()
+    engine_task = asyncio.create_task(
+        background_engine_loop(),
+        name="auto-trade-engine",
+    )
+    logger.info(
+        "Background auto-trade engine started (interval=%.2fs)",
+        engine_interval_seconds,
+    )
     try:
         yield
     finally:
+        engine_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await engine_task
+        try:
+            await asyncio.to_thread(trading.persist_runtime_state, True)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to persist auto-trade runtime state on shutdown")
+        logger.info("Background auto-trade engine stopped")
         await ws_manager.stop()
         await exchange_stream.stop()
         await asyncio.to_thread(exchange.close)
