@@ -61,7 +61,7 @@ class AlertService:
             return False
         if not bool(getattr(self.settings, "telegram_auto_trade_only", True)):
             return True
-        return alert_type.startswith("auto_trade_")
+        return alert_type.startswith("auto_trade_") or alert_type.startswith("builder_")
 
     @staticmethod
     def _format_price(value: float) -> str:

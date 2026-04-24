@@ -450,6 +450,57 @@
       border-color: rgba(255, 91, 91, 0.45);
     }
 
+    .chart-orderflow-mini {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      z-index: 4;
+      width: min(280px, 50%);
+      border: 1px solid rgba(148, 163, 184, 0.32);
+      border-radius: 10px;
+      background: rgba(6, 13, 27, 0.88);
+      backdrop-filter: blur(3px);
+      padding: 8px;
+    }
+
+    .chart-orderflow-mini.hidden {
+      display: none;
+    }
+
+    .chart-mini-head {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.2px;
+    }
+
+    .chart-mini-grid {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .chart-mini-item {
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 8px;
+      background: rgba(11, 19, 40, 0.75);
+      padding: 6px;
+    }
+
+    .chart-mini-item .k {
+      display: block;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 2px;
+      letter-spacing: 0.2px;
+    }
+
+    .chart-mini-item .v {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .chart-mtf-ribbon {
       position: absolute;
       right: 8px;
@@ -770,6 +821,28 @@
       color: var(--muted);
     }
 
+    .panel-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .builder-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      margin-bottom: 10px;
+    }
+
+    .builder-rules-list {
+      max-height: 170px;
+    }
+
+    .preset-note {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     .legal-footer {
       display: grid;
       gap: 6px;
@@ -914,6 +987,14 @@
       .wallet-grid {
         grid-template-columns: 1fr;
       }
+
+      .builder-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-orderflow-mini {
+        width: calc(100% - 16px);
+      }
     }
   </style>
 </head>
@@ -995,12 +1076,23 @@
             <span class="chart-overlay-chip" id="chart-ov-spread">Spread: -</span>
             <span class="chart-overlay-chip" id="chart-ov-edge">Edge L/S: -</span>
             <span class="chart-overlay-chip" id="chart-ov-rank">Rank L/S: -</span>
+            <span class="chart-overlay-chip" id="chart-ov-sr">S/R: -</span>
+            <span class="chart-overlay-chip" id="chart-ov-trend">Trendline: -</span>
           </div>
           <div class="chart-mtf-ribbon">
             <span class="mtf-chip mtf-hold" id="chart-mtf-1m">1m -</span>
             <span class="mtf-chip mtf-hold" id="chart-mtf-5m">5m -</span>
             <span class="mtf-chip mtf-hold" id="chart-mtf-15m">15m -</span>
             <span class="mtf-chip mtf-hold" id="chart-mtf-align">MTF -</span>
+          </div>
+          <div class="chart-orderflow-mini" id="chart-orderflow-mini">
+            <div class="chart-mini-head">Entry Timing (Mini Tape)</div>
+            <div class="chart-mini-grid">
+              <article class="chart-mini-item"><span class="k">Spread</span><span class="v" id="chart-mini-spread">-</span></article>
+              <article class="chart-mini-item"><span class="k">Imbalance</span><span class="v" id="chart-mini-imbalance">-</span></article>
+              <article class="chart-mini-item"><span class="k">Tape Flow</span><span class="v" id="chart-mini-tape">-</span></article>
+              <article class="chart-mini-item"><span class="k">Pressure</span><span class="v" id="chart-mini-pressure">-</span></article>
+            </div>
           </div>
         </div>
         <div class="subcharts">
@@ -1134,6 +1226,110 @@
             <div class="alert-msg">Signal and RSI alerts will appear here in real time.</div>
           </article>
         </div>
+      </section>
+    </section>
+
+    <section class="tools-grid">
+      <section class="panel">
+        <h3 class="tool-title">Alert Builder (EMA/RSI/Breakout)</h3>
+        <div class="builder-grid">
+          <label class="field">
+            Rule Type
+            <select id="builder-rule-type">
+              <option value="ema_cross">EMA Cross</option>
+              <option value="rsi_zone">RSI Zone</option>
+              <option value="breakout">Breakout</option>
+            </select>
+          </label>
+          <label class="field">
+            Condition
+            <select id="builder-condition"></select>
+          </label>
+          <label class="field">
+            Threshold / Lookback
+            <input id="builder-threshold" type="number" min="1" max="200" step="1" value="14" />
+          </label>
+          <label class="field">
+            Cooldown (sec)
+            <input id="builder-cooldown" type="number" min="5" max="3600" step="5" value="60" />
+          </label>
+        </div>
+        <div class="alert-controls">
+          <button id="builder-telegram-toggle" class="toggle-btn" type="button">Telegram OFF</button>
+          <button id="builder-add-rule" class="toggle-btn active" type="button">Add Rule</button>
+          <button id="builder-clear-rules" class="toggle-btn" type="button">Clear Rules</button>
+        </div>
+        <div class="alerts-list builder-rules-list" id="builder-rules-list">
+          <article class="alert-item">
+            <div class="alert-title">No builder rules yet</div>
+            <div class="alert-msg">Create EMA/RSI/Breakout rule and it will trigger in real time for selected symbol.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel panel-stack">
+        <section>
+          <h3 class="tool-title">Replay / Backtest (Entry/Exit Simulation)</h3>
+          <div class="builder-grid">
+            <label class="field">
+              Start % History
+              <input id="replay-start-pct" type="number" min="5" max="95" step="1" value="35" />
+            </label>
+            <label class="field">
+              Speed (ms)
+              <input id="replay-speed-ms" type="number" min="120" max="4000" step="10" value="450" />
+            </label>
+            <label class="field">
+              TP %
+              <input id="replay-tp-pct" type="number" min="0.2" max="20" step="0.1" value="2.0" />
+            </label>
+            <label class="field">
+              SL %
+              <input id="replay-sl-pct" type="number" min="0.1" max="20" step="0.1" value="1.2" />
+            </label>
+          </div>
+          <div class="alert-controls">
+            <button id="replay-start-btn" class="toggle-btn" type="button">Start</button>
+            <button id="replay-play-btn" class="toggle-btn" type="button">Play</button>
+            <button id="replay-step-btn" class="toggle-btn" type="button">Step</button>
+            <button id="replay-reset-btn" class="toggle-btn" type="button">Reset</button>
+          </div>
+          <div class="risk-results">
+            <article class="result-box"><span class="k">Status</span><span class="v" id="replay-status">IDLE</span></article>
+            <article class="result-box"><span class="k">Progress</span><span class="v" id="replay-progress">-</span></article>
+            <article class="result-box"><span class="k">Trades</span><span class="v" id="replay-trades">0</span></article>
+            <article class="result-box"><span class="k">Win Rate</span><span class="v" id="replay-win-rate">-</span></article>
+            <article class="result-box"><span class="k">PnL %</span><span class="v" id="replay-pnl-pct">-</span></article>
+            <article class="result-box"><span class="k">Last Event</span><span class="v" id="replay-last-event">-</span></article>
+          </div>
+        </section>
+
+        <section>
+          <h3 class="tool-title">Chart Presets (Per Symbol)</h3>
+          <div class="builder-grid">
+            <label class="field">
+              Preset Name
+              <input id="preset-name" type="text" maxlength="32" value="scalping" />
+            </label>
+            <label class="field">
+              Saved Preset
+              <select id="preset-select">
+                <option value="">-</option>
+              </select>
+            </label>
+          </div>
+          <div class="alert-controls">
+            <button id="preset-toggle-sr" class="toggle-btn active" type="button">S/R ON</button>
+            <button id="preset-toggle-trend" class="toggle-btn active" type="button">Trend ON</button>
+            <button id="preset-toggle-mini" class="toggle-btn active" type="button">Mini Tape ON</button>
+          </div>
+          <div class="alert-controls">
+            <button id="preset-save-btn" class="toggle-btn" type="button">Save</button>
+            <button id="preset-load-btn" class="toggle-btn" type="button">Load</button>
+            <button id="preset-delete-btn" class="toggle-btn" type="button">Delete</button>
+          </div>
+          <div class="preset-note" id="preset-status">Preset simpan dalam browser dan ikut symbol semasa.</div>
+        </section>
       </section>
     </section>
 

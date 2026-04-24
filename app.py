@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from services.alerts import AlertService
 from services.config import load_settings
@@ -103,6 +104,15 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+class AlertBuilderTriggerPayload(BaseModel):
+    symbol: str
+    title: str
+    message: str
+    severity: str = "medium"
+    type: str = "builder_rule"
+    meta: dict[str, Any] | None = None
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", {"request": request})
@@ -174,6 +184,36 @@ def trade_journal_csv(limit: int = 1000) -> Response:
     filename = f"trade_journal_{timestamp}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/api/alert-builder/trigger")
+def alert_builder_trigger(payload: AlertBuilderTriggerPayload) -> dict[str, Any]:
+    symbol = (payload.symbol or "").strip().upper()
+    if not symbol:
+        symbol = settings.default_symbol
+
+    title = (payload.title or "Builder Alert").strip()[:140]
+    message = (payload.message or "").strip()[:320]
+    alert_type = (payload.type or "builder_rule").strip().lower().replace(" ", "_")
+    severity = (payload.severity or "medium").strip().lower()
+    if severity not in {"low", "medium", "high"}:
+        severity = "medium"
+
+    meta_payload = payload.meta if isinstance(payload.meta, dict) else {}
+    merged_meta = {
+        "event": "ALERT_BUILDER",
+        **meta_payload,
+    }
+
+    alerts.emit_alert(
+        symbol=symbol,
+        alert_type=alert_type,
+        title=title,
+        message=message,
+        severity=severity,
+        meta=merged_meta,
+    )
+    return {"ok": True, "symbol": symbol, "type": alert_type}
 
 
 @app.websocket("/ws")

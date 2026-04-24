@@ -32,10 +32,17 @@ const macdChartContainer = document.getElementById("macd-chart");
 const chartOverlaySpreadNode = document.getElementById("chart-ov-spread");
 const chartOverlayEdgeNode = document.getElementById("chart-ov-edge");
 const chartOverlayRankNode = document.getElementById("chart-ov-rank");
+const chartOverlaySrNode = document.getElementById("chart-ov-sr");
+const chartOverlayTrendNode = document.getElementById("chart-ov-trend");
 const chartMtf1mNode = document.getElementById("chart-mtf-1m");
 const chartMtf5mNode = document.getElementById("chart-mtf-5m");
 const chartMtf15mNode = document.getElementById("chart-mtf-15m");
 const chartMtfAlignNode = document.getElementById("chart-mtf-align");
+const chartOrderflowMiniNode = document.getElementById("chart-orderflow-mini");
+const chartMiniSpreadNode = document.getElementById("chart-mini-spread");
+const chartMiniImbalanceNode = document.getElementById("chart-mini-imbalance");
+const chartMiniTapeNode = document.getElementById("chart-mini-tape");
+const chartMiniPressureNode = document.getElementById("chart-mini-pressure");
 
 const execOutMarketState = document.getElementById("exec-out-market-state");
 const execOutAiGate = document.getElementById("exec-out-ai-gate");
@@ -69,6 +76,37 @@ const alertsListNode = document.getElementById("alerts-list");
 const toggleSoundBtn = document.getElementById("toggle-sound");
 const toggleBrowserAlertBtn = document.getElementById("toggle-browser-alert");
 const clearAlertsBtn = document.getElementById("clear-alerts");
+const builderRuleTypeNode = document.getElementById("builder-rule-type");
+const builderConditionNode = document.getElementById("builder-condition");
+const builderThresholdNode = document.getElementById("builder-threshold");
+const builderCooldownNode = document.getElementById("builder-cooldown");
+const builderTelegramToggleBtn = document.getElementById("builder-telegram-toggle");
+const builderAddRuleBtn = document.getElementById("builder-add-rule");
+const builderClearRulesBtn = document.getElementById("builder-clear-rules");
+const builderRulesListNode = document.getElementById("builder-rules-list");
+const replayStartPctNode = document.getElementById("replay-start-pct");
+const replaySpeedMsNode = document.getElementById("replay-speed-ms");
+const replayTpPctNode = document.getElementById("replay-tp-pct");
+const replaySlPctNode = document.getElementById("replay-sl-pct");
+const replayStartBtn = document.getElementById("replay-start-btn");
+const replayPlayBtn = document.getElementById("replay-play-btn");
+const replayStepBtn = document.getElementById("replay-step-btn");
+const replayResetBtn = document.getElementById("replay-reset-btn");
+const replayStatusNode = document.getElementById("replay-status");
+const replayProgressNode = document.getElementById("replay-progress");
+const replayTradesNode = document.getElementById("replay-trades");
+const replayWinRateNode = document.getElementById("replay-win-rate");
+const replayPnlPctNode = document.getElementById("replay-pnl-pct");
+const replayLastEventNode = document.getElementById("replay-last-event");
+const presetNameNode = document.getElementById("preset-name");
+const presetSelectNode = document.getElementById("preset-select");
+const presetToggleSrBtn = document.getElementById("preset-toggle-sr");
+const presetToggleTrendBtn = document.getElementById("preset-toggle-trend");
+const presetToggleMiniBtn = document.getElementById("preset-toggle-mini");
+const presetSaveBtn = document.getElementById("preset-save-btn");
+const presetLoadBtn = document.getElementById("preset-load-btn");
+const presetDeleteBtn = document.getElementById("preset-delete-btn");
+const presetStatusNode = document.getElementById("preset-status");
 
 const autoTradeStatusNode = document.getElementById("auto-trade-status");
 const autoTradeModeNode = document.getElementById("auto-trade-mode");
@@ -106,7 +144,9 @@ let marketRows = [];
 let currentSummary = null;
 let latestAutoTrade = {};
 let latestChartPayload = null;
+let latestLiveChartPayload = null;
 let latestChartTimeframe = "1m";
+let latestOrderflowPayload = null;
 let chartPriceLines = [];
 let crosshairSyncGuard = false;
 let chartSeriesLookup = {
@@ -121,11 +161,40 @@ let chartAutoFitArmed = true;
 let lastChartViewKey = "";
 
 let allAlerts = [];
+let latestServerAlerts = [];
+let localAlerts = [];
+let localAlertCounter = 700000;
 let alertCutoffId = 0;
 let seenAlertIds = new Set();
 let soundEnabled = true;
 let browserAlertEnabled = false;
 let audioContext = null;
+let builderRuleCounter = 0;
+let builderTelegramEnabled = false;
+let builderRules = [];
+let replayState = {
+  active: false,
+  playing: false,
+  timer: null,
+  sourceChart: null,
+  candles: [],
+  cursor: 0,
+  startIndex: 0,
+  position: null,
+  stats: {
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    pnlPct: 0,
+    lastEvent: "-",
+  },
+  markers: [],
+};
+const chartDisplaySettings = {
+  showSr: true,
+  showTrend: true,
+  showMiniTape: true,
+};
 
 let priceChart;
 let rsiChart;
@@ -140,6 +209,8 @@ let vwapLower1Series;
 let vwapUpper2Series;
 let vwapLower2Series;
 let volumeSeries;
+let trendUpSeries;
+let trendDownSeries;
 
 let rsiSeries;
 let rsiUpperSeries;
@@ -148,6 +219,24 @@ let rsiLowerSeries;
 let macdSeries;
 let macdSignalSeries;
 let macdHistogramSeries;
+
+let latestStructure = null;
+const ALERT_BUILDER_RULES_KEY = "nurix.alert.builder.rules.v1";
+const CHART_PRESETS_KEY = "nurix.chart.presets.v1";
+const ALERT_BUILDER_RULE_OPTIONS = {
+  ema_cross: [
+    { value: "bull_cross", label: "EMA20 cross above EMA50" },
+    { value: "bear_cross", label: "EMA20 cross below EMA50" },
+  ],
+  rsi_zone: [
+    { value: "rsi_overbought", label: "RSI cross above threshold" },
+    { value: "rsi_oversold", label: "RSI cross below threshold" },
+  ],
+  breakout: [
+    { value: "breakout_up", label: "Close break above lookback high" },
+    { value: "breakout_down", label: "Close break below lookback low" },
+  ],
+};
 
 function timeframeToSeconds(timeframe) {
   const tf = String(timeframe || "").toLowerCase().trim();
@@ -209,6 +298,32 @@ function valueAtOrNear(map, times, target, maxDeltaSeconds) {
 
 function clampValue(value, low, high) {
   return Math.max(low, Math.min(high, value));
+}
+
+function safeParseJson(rawValue, fallback) {
+  try {
+    if (!rawValue) return fallback;
+    const parsed = JSON.parse(rawValue);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadStoredObject(key, fallback) {
+  try {
+    return safeParseJson(window.localStorage.getItem(key), fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveStoredObject(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // best effort only
+  }
 }
 
 function escapeHtml(text) {
@@ -375,8 +490,10 @@ function renderWatchlist(rows) {
 
     tr.addEventListener("click", () => {
       if (!row.symbol) return;
+      if (replayState.active) resetReplayMode();
       selectedSymbol = row.symbol;
       symbolSelect.value = selectedSymbol;
+      refreshPresetSelect();
       renderWatchlist(marketRows);
       armChartAutoFit();
       sendViewUpdate();
@@ -532,8 +649,93 @@ function renderRecentTrades(trades) {
     .join("");
 }
 
+function setTone(node, tone = "") {
+  if (!node) return;
+  node.classList.remove("pos", "neg");
+  if (tone === "pos") node.classList.add("pos");
+  if (tone === "neg") node.classList.add("neg");
+}
+
+function renderChartOrderflowMini(payload) {
+  if (!chartOrderflowMiniNode) return;
+
+  if (!chartDisplaySettings.showMiniTape) {
+    chartOrderflowMiniNode.classList.add("hidden");
+    return;
+  }
+  chartOrderflowMiniNode.classList.remove("hidden");
+
+  const orderbook = payload?.orderbook || {};
+  const bids = Array.isArray(orderbook.bids) ? orderbook.bids : [];
+  const asks = Array.isArray(orderbook.asks) ? orderbook.asks : [];
+  const trades = Array.isArray(payload?.trades) ? payload.trades : [];
+
+  const spreadPct = Number(orderbook.spread_pct);
+  if (chartMiniSpreadNode) {
+    chartMiniSpreadNode.textContent = Number.isFinite(spreadPct)
+      ? `${fmtNumber(spreadPct, 3)}%`
+      : "-";
+    setTone(chartMiniSpreadNode, Number.isFinite(spreadPct) && spreadPct <= 0.08 ? "pos" : "");
+  }
+
+  const bidDepth = bids.slice(0, 6).reduce((sum, level) => sum + (Number(level.amount) || 0), 0);
+  const askDepth = asks.slice(0, 6).reduce((sum, level) => sum + (Number(level.amount) || 0), 0);
+  const depthTotal = bidDepth + askDepth;
+  const imbalancePct = depthTotal > 0 ? ((bidDepth - askDepth) / depthTotal) * 100 : Number.NaN;
+  if (chartMiniImbalanceNode) {
+    chartMiniImbalanceNode.textContent = Number.isFinite(imbalancePct)
+      ? `${fmtNumber(imbalancePct, 1)}%`
+      : "-";
+    setTone(
+      chartMiniImbalanceNode,
+      Number.isFinite(imbalancePct)
+        ? (imbalancePct >= 8 ? "pos" : imbalancePct <= -8 ? "neg" : "")
+        : "",
+    );
+  }
+
+  const buyFlow = trades
+    .filter((trade) => String(trade?.side || "").toLowerCase() === "buy")
+    .reduce((sum, trade) => sum + ((Number(trade.amount) || 0) * (Number(trade.price) || 0)), 0);
+  const sellFlow = trades
+    .filter((trade) => String(trade?.side || "").toLowerCase() === "sell")
+    .reduce((sum, trade) => sum + ((Number(trade.amount) || 0) * (Number(trade.price) || 0)), 0);
+  const tapeTotal = buyFlow + sellFlow;
+  const tapeFlowPct = tapeTotal > 0 ? ((buyFlow - sellFlow) / tapeTotal) * 100 : Number.NaN;
+  if (chartMiniTapeNode) {
+    chartMiniTapeNode.textContent = Number.isFinite(tapeFlowPct)
+      ? `${fmtNumber(tapeFlowPct, 1)}%`
+      : "-";
+    setTone(
+      chartMiniTapeNode,
+      Number.isFinite(tapeFlowPct)
+        ? (tapeFlowPct >= 8 ? "pos" : tapeFlowPct <= -8 ? "neg" : "")
+        : "",
+    );
+  }
+
+  let pressure = "NEUTRAL";
+  let pressureTone = "";
+  if (Number.isFinite(imbalancePct) && Number.isFinite(tapeFlowPct)) {
+    if (imbalancePct >= 10 && tapeFlowPct >= 10) {
+      pressure = "BUY";
+      pressureTone = "pos";
+    } else if (imbalancePct <= -10 && tapeFlowPct <= -10) {
+      pressure = "SELL";
+      pressureTone = "neg";
+    } else {
+      pressure = "MIXED";
+    }
+  }
+  if (chartMiniPressureNode) {
+    chartMiniPressureNode.textContent = pressure;
+    setTone(chartMiniPressureNode, pressureTone);
+  }
+}
+
 function renderOrderflow(orderflow) {
   const payload = orderflow || {};
+  latestOrderflowPayload = payload;
   const orderbook = payload.orderbook || {};
 
   if (orderflowSymbolNode) {
@@ -571,6 +773,8 @@ function renderOrderflow(orderflow) {
       orderflowErrorNode.classList.remove("show");
     }
   }
+
+  renderChartOrderflowMini(payload);
 }
 
 function setChartOverlayValue(node, text, tone = "") {
@@ -655,6 +859,47 @@ function updateChartOverlay() {
 
   const summary = currentSummary;
   const autoTrade = latestAutoTrade || {};
+  const structure = latestStructure || {};
+  const supports = Array.isArray(structure.supports) ? structure.supports : [];
+  const resistances = Array.isArray(structure.resistances) ? structure.resistances : [];
+  const lastPrice = Number.isFinite(Number(summary?.price))
+    ? Number(summary.price)
+    : Number(structure.lastClose);
+
+  if (chartOverlaySrNode) {
+    const srText = !chartDisplaySettings.showSr
+      ? "S/R: OFF"
+      : (
+        supports.length === 0 && resistances.length === 0
+          ? "S/R: -"
+          : `S/R: ${
+            Number.isFinite(supports[0]) ? `S1 ${fmtPrice(supports[0])}` : "S1 -"
+          } • ${
+            Number.isFinite(resistances[0]) ? `R1 ${fmtPrice(resistances[0])}` : "R1 -"
+          }`
+      );
+    const srTone = Number.isFinite(lastPrice) && Number.isFinite(resistances[0]) && lastPrice >= resistances[0]
+      ? "pos"
+      : Number.isFinite(lastPrice) && Number.isFinite(supports[0]) && lastPrice <= supports[0]
+        ? "neg"
+        : "";
+    setChartOverlayValue(chartOverlaySrNode, srText, chartDisplaySettings.showSr ? srTone : "");
+  }
+
+  if (chartOverlayTrendNode) {
+    if (!chartDisplaySettings.showTrend) {
+      setChartOverlayValue(chartOverlayTrendNode, "Trendline: OFF");
+    } else {
+      const trendBias = String(structure.trendBias || "HOLD").toUpperCase();
+      const trendTone = trendBias === "UP" ? "pos" : trendBias === "DOWN" ? "neg" : "";
+      setChartOverlayValue(
+        chartOverlayTrendNode,
+        `Trendline: ${trendBias}`,
+        trendTone,
+      );
+    }
+  }
+
   if (!summary || typeof summary !== "object") {
     setChartOverlayValue(chartOverlaySpreadNode, "Spread: -");
     setChartOverlayValue(chartOverlayEdgeNode, "Edge L/S: -");
@@ -741,6 +986,818 @@ function renderMtfRibbon(mtfBias) {
   setMtfChip(chartMtfAlignNode, `MTF ${alignment}`, alignTone);
 }
 
+function createSeriesValueMap(series) {
+  const map = new Map();
+  (Array.isArray(series) ? series : []).forEach((point) => {
+    const time = normalizeChartTime(point?.time);
+    const value = Number(point?.value);
+    if (!Number.isFinite(time) || !Number.isFinite(value)) return;
+    map.set(time, value);
+  });
+  return map;
+}
+
+function resetReplayUi() {
+  if (replayStatusNode) replayStatusNode.textContent = replayState.active ? "READY" : "IDLE";
+  if (replayProgressNode) {
+    replayProgressNode.textContent = replayState.active
+      ? `${replayState.cursor + 1}/${replayState.candles.length}`
+      : "-";
+  }
+  if (replayTradesNode) replayTradesNode.textContent = String(replayState.stats.trades || 0);
+  if (replayWinRateNode) {
+    const trades = Number(replayState.stats.trades || 0);
+    const wins = Number(replayState.stats.wins || 0);
+    replayWinRateNode.textContent = trades > 0 ? `${fmtNumber((wins / trades) * 100, 1)}%` : "-";
+  }
+  if (replayPnlPctNode) {
+    const pnlPct = Number(replayState.stats.pnlPct);
+    replayPnlPctNode.textContent = Number.isFinite(pnlPct) ? `${fmtNumber(pnlPct, 2)}%` : "-";
+    replayPnlPctNode.classList.remove("pos", "neg");
+    if (Number.isFinite(pnlPct) && pnlPct > 0) replayPnlPctNode.classList.add("pos");
+    if (Number.isFinite(pnlPct) && pnlPct < 0) replayPnlPctNode.classList.add("neg");
+  }
+  if (replayLastEventNode) replayLastEventNode.textContent = replayState.stats.lastEvent || "-";
+
+  if (replayPlayBtn) {
+    replayPlayBtn.classList.toggle("active", replayState.playing);
+    replayPlayBtn.textContent = replayState.playing ? "Pause" : "Play";
+  }
+}
+
+function stopReplayTimer() {
+  if (replayState.timer) {
+    clearInterval(replayState.timer);
+    replayState.timer = null;
+  }
+  replayState.playing = false;
+  resetReplayUi();
+}
+
+function sliceSeriesToTime(series, cutoffTime) {
+  return (Array.isArray(series) ? series : [])
+    .filter((point) => normalizeChartTime(point?.time) <= cutoffTime);
+}
+
+function renderReplaySlice() {
+  if (!replayState.active || !replayState.sourceChart) return;
+  const source = replayState.sourceChart;
+  const candles = Array.isArray(source.candles) ? source.candles : [];
+  if (candles.length === 0) return;
+
+  const safeCursor = clampValue(replayState.cursor, 0, candles.length - 1);
+  replayState.cursor = safeCursor;
+  const cutoff = normalizeChartTime(candles[safeCursor]?.time);
+  if (!Number.isFinite(cutoff)) return;
+
+  const replayChart = {
+    ...source,
+    candles: sliceSeriesToTime(source.candles, cutoff),
+    ema20: sliceSeriesToTime(source.ema20, cutoff),
+    ema50: sliceSeriesToTime(source.ema50, cutoff),
+    vwap_session: sliceSeriesToTime(source.vwap_session, cutoff),
+    vwap_upper_1: sliceSeriesToTime(source.vwap_upper_1, cutoff),
+    vwap_lower_1: sliceSeriesToTime(source.vwap_lower_1, cutoff),
+    vwap_upper_2: sliceSeriesToTime(source.vwap_upper_2, cutoff),
+    vwap_lower_2: sliceSeriesToTime(source.vwap_lower_2, cutoff),
+    volume: sliceSeriesToTime(source.volume, cutoff),
+    rsi: sliceSeriesToTime(source.rsi, cutoff),
+    macd: sliceSeriesToTime(source.macd, cutoff),
+    macd_signal: sliceSeriesToTime(source.macd_signal, cutoff),
+    macd_histogram: sliceSeriesToTime(source.macd_histogram, cutoff),
+  };
+
+  latestChartPayload = replayChart;
+  latestChartTimeframe = String(replayChart.timeframe || selectedTimeframe || "1m");
+  candleSeries.setData(replayChart.candles || []);
+  ema20Series.setData(replayChart.ema20 || []);
+  ema50Series.setData(replayChart.ema50 || []);
+  vwapSessionSeries.setData(replayChart.vwap_session || []);
+  vwapUpper1Series.setData(replayChart.vwap_upper_1 || []);
+  vwapLower1Series.setData(replayChart.vwap_lower_1 || []);
+  vwapUpper2Series.setData(replayChart.vwap_upper_2 || []);
+  vwapLower2Series.setData(replayChart.vwap_lower_2 || []);
+  volumeSeries.setData(replayChart.volume || []);
+  rsiSeries.setData(replayChart.rsi || []);
+  rsiUpperSeries.setData((replayChart.rsi || []).map((point) => ({ time: point.time, value: 70 })));
+  rsiLowerSeries.setData((replayChart.rsi || []).map((point) => ({ time: point.time, value: 30 })));
+  macdSeries.setData(replayChart.macd || []);
+  macdSignalSeries.setData(replayChart.macd_signal || []);
+  macdHistogramSeries.setData(replayChart.macd_histogram || []);
+  rebuildChartSeriesLookup(replayChart);
+  refreshChartDecorations();
+  updateChartOverlay();
+  renderMtfRibbon(replayChart.mtf_bias);
+  resetReplayUi();
+}
+
+function closeReplayPosition(exitPrice, reason, time) {
+  if (!replayState.position) return;
+  const position = replayState.position;
+  const side = String(position.side || "LONG").toUpperCase();
+  const entry = Number(position.entryPrice);
+  const safeExit = Number(exitPrice);
+  if (!Number.isFinite(entry) || !Number.isFinite(safeExit) || entry <= 0 || safeExit <= 0) return;
+
+  const pnlPct = side === "SHORT"
+    ? ((entry - safeExit) / entry) * 100
+    : ((safeExit - entry) / entry) * 100;
+  const stats = replayState.stats;
+  stats.trades += 1;
+  if (pnlPct >= 0) stats.wins += 1;
+  else stats.losses += 1;
+  stats.pnlPct += pnlPct;
+  stats.lastEvent = `${side} ${reason} ${fmtNumber(pnlPct, 2)}%`;
+
+  replayState.markers.push({
+    time,
+    position: side === "SHORT" ? "belowBar" : "aboveBar",
+    shape: reason === "SL" ? "square" : (side === "SHORT" ? "arrowUp" : "arrowDown"),
+    color: reason === "SL" ? "#ef4444" : "#10b981",
+    text: reason,
+  });
+  replayState.position = null;
+}
+
+function openReplayPosition(side, entryPrice, time) {
+  const tpPct = Math.max(0.1, Number(replayTpPctNode?.value) || 2.0);
+  const slPct = Math.max(0.1, Number(replaySlPctNode?.value) || 1.2);
+  const isShort = side === "SHORT";
+  const tpPrice = isShort
+    ? entryPrice * (1 - tpPct / 100)
+    : entryPrice * (1 + tpPct / 100);
+  const slPrice = isShort
+    ? entryPrice * (1 + slPct / 100)
+    : entryPrice * (1 - slPct / 100);
+
+  replayState.position = {
+    side,
+    entryPrice,
+    tpPrice,
+    slPrice,
+  };
+  replayState.markers.push({
+    time,
+    position: isShort ? "aboveBar" : "belowBar",
+    shape: isShort ? "arrowDown" : "arrowUp",
+    color: isShort ? "#f97316" : "#22c55e",
+    text: isShort ? "ENTRY S" : "ENTRY L",
+  });
+  replayState.stats.lastEvent = `${side} ENTRY @ ${fmtPrice(entryPrice)}`;
+}
+
+function advanceReplayStep() {
+  if (!replayState.active || !replayState.sourceChart) return;
+  const candles = replayState.candles;
+  if (!Array.isArray(candles) || candles.length < 3) return;
+  if (replayState.cursor >= candles.length - 1) {
+    stopReplayTimer();
+    replayState.stats.lastEvent = "Replay finished";
+    resetReplayUi();
+    return;
+  }
+
+  replayState.cursor += 1;
+  const current = candles[replayState.cursor];
+  const prev = candles[replayState.cursor - 1];
+  const t = normalizeChartTime(current?.time);
+  const prevT = normalizeChartTime(prev?.time);
+  const close = Number(current?.close);
+  const high = Number(current?.high);
+  const low = Number(current?.low);
+  const prevClose = Number(prev?.close);
+
+  const ema20 = Number(replayState.ema20Map?.get(t));
+  const ema50 = Number(replayState.ema50Map?.get(t));
+  const prevEma20 = Number(replayState.ema20Map?.get(prevT));
+  const prevEma50 = Number(replayState.ema50Map?.get(prevT));
+  const rsi = Number(replayState.rsiMap?.get(t));
+
+  if (replayState.position) {
+    const position = replayState.position;
+    const side = String(position.side || "LONG").toUpperCase();
+    let exitReason = "";
+    let exitPrice = close;
+
+    if (side === "LONG") {
+      if (Number.isFinite(low) && low <= position.slPrice) {
+        exitReason = "SL";
+        exitPrice = position.slPrice;
+      } else if (Number.isFinite(high) && high >= position.tpPrice) {
+        exitReason = "TP2";
+        exitPrice = position.tpPrice;
+      } else if (
+        Number.isFinite(prevEma20)
+        && Number.isFinite(prevEma50)
+        && Number.isFinite(ema20)
+        && Number.isFinite(ema50)
+        && prevEma20 >= prevEma50
+        && ema20 < ema50
+      ) {
+        exitReason = "REV";
+        exitPrice = close;
+      }
+    } else {
+      if (Number.isFinite(high) && high >= position.slPrice) {
+        exitReason = "SL";
+        exitPrice = position.slPrice;
+      } else if (Number.isFinite(low) && low <= position.tpPrice) {
+        exitReason = "TP2";
+        exitPrice = position.tpPrice;
+      } else if (
+        Number.isFinite(prevEma20)
+        && Number.isFinite(prevEma50)
+        && Number.isFinite(ema20)
+        && Number.isFinite(ema50)
+        && prevEma20 <= prevEma50
+        && ema20 > ema50
+      ) {
+        exitReason = "REV";
+        exitPrice = close;
+      }
+    }
+
+    if (exitReason && Number.isFinite(t)) {
+      closeReplayPosition(exitPrice, exitReason, t);
+    }
+  }
+
+  if (!replayState.position && Number.isFinite(close) && Number.isFinite(t)) {
+    const crossUp = (
+      Number.isFinite(prevEma20)
+      && Number.isFinite(prevEma50)
+      && Number.isFinite(ema20)
+      && Number.isFinite(ema50)
+      && prevEma20 <= prevEma50
+      && ema20 > ema50
+    );
+    const crossDown = (
+      Number.isFinite(prevEma20)
+      && Number.isFinite(prevEma50)
+      && Number.isFinite(ema20)
+      && Number.isFinite(ema50)
+      && prevEma20 >= prevEma50
+      && ema20 < ema50
+    );
+    const longReady = crossUp && (!Number.isFinite(rsi) || rsi <= 70);
+    const shortReady = crossDown && (!Number.isFinite(rsi) || rsi >= 30);
+
+    if (longReady) {
+      openReplayPosition("LONG", close, t);
+    } else if (shortReady) {
+      openReplayPosition("SHORT", close, t);
+    } else if (Number.isFinite(prevClose) && Number.isFinite(close)) {
+      replayState.stats.lastEvent = close > prevClose ? "No entry (up candle)" : "No entry";
+    }
+  }
+
+  renderReplaySlice();
+}
+
+function startReplayMode() {
+  const source = latestLiveChartPayload || latestChartPayload;
+  const candles = Array.isArray(source?.candles) ? source.candles : [];
+  if (!source || candles.length < 40) {
+    lastUpdateNode.textContent = "Replay requires at least 40 candles.";
+    return;
+  }
+
+  stopReplayTimer();
+  const startPct = clampValue(Number(replayStartPctNode?.value) || 35, 5, 95);
+  const startIndex = clampValue(
+    Math.floor((candles.length - 1) * (startPct / 100)),
+    20,
+    Math.max(20, candles.length - 2),
+  );
+  replayState = {
+    active: true,
+    playing: false,
+    timer: null,
+    sourceChart: {
+      ...source,
+      candles: [...(source.candles || [])],
+      ema20: [...(source.ema20 || [])],
+      ema50: [...(source.ema50 || [])],
+      vwap_session: [...(source.vwap_session || [])],
+      vwap_upper_1: [...(source.vwap_upper_1 || [])],
+      vwap_lower_1: [...(source.vwap_lower_1 || [])],
+      vwap_upper_2: [...(source.vwap_upper_2 || [])],
+      vwap_lower_2: [...(source.vwap_lower_2 || [])],
+      volume: [...(source.volume || [])],
+      rsi: [...(source.rsi || [])],
+      macd: [...(source.macd || [])],
+      macd_signal: [...(source.macd_signal || [])],
+      macd_histogram: [...(source.macd_histogram || [])],
+    },
+    candles: [...candles],
+    cursor: startIndex,
+    startIndex,
+    position: null,
+    stats: {
+      trades: 0,
+      wins: 0,
+      losses: 0,
+      pnlPct: 0,
+      lastEvent: "Replay started",
+    },
+    markers: [],
+    ema20Map: createSeriesValueMap(source.ema20),
+    ema50Map: createSeriesValueMap(source.ema50),
+    rsiMap: createSeriesValueMap(source.rsi),
+  };
+
+  renderReplaySlice();
+}
+
+function resetReplayMode() {
+  stopReplayTimer();
+  replayState = {
+    active: false,
+    playing: false,
+    timer: null,
+    sourceChart: null,
+    candles: [],
+    cursor: 0,
+    startIndex: 0,
+    position: null,
+    stats: {
+      trades: 0,
+      wins: 0,
+      losses: 0,
+      pnlPct: 0,
+      lastEvent: "-",
+    },
+    markers: [],
+  };
+  resetReplayUi();
+  if (latestLiveChartPayload) renderChart(latestLiveChartPayload);
+}
+
+function toggleReplayPlay() {
+  if (!replayState.active) startReplayMode();
+  if (!replayState.active) return;
+
+  if (replayState.playing) {
+    stopReplayTimer();
+    return;
+  }
+
+  const speedMs = clampValue(Number(replaySpeedMsNode?.value) || 450, 120, 4000);
+  replayState.playing = true;
+  replayState.timer = setInterval(() => {
+    if (!replayState.active) {
+      stopReplayTimer();
+      return;
+    }
+    advanceReplayStep();
+    if (replayState.cursor >= replayState.candles.length - 1) {
+      stopReplayTimer();
+    }
+  }, speedMs);
+  resetReplayUi();
+}
+
+function getPresetStore() {
+  return loadStoredObject(CHART_PRESETS_KEY, {});
+}
+
+function savePresetStore(store) {
+  saveStoredObject(CHART_PRESETS_KEY, store);
+}
+
+function applyChartSettingButtons() {
+  const mappings = [
+    { btn: presetToggleSrBtn, enabled: chartDisplaySettings.showSr, on: "S/R ON", off: "S/R OFF" },
+    { btn: presetToggleTrendBtn, enabled: chartDisplaySettings.showTrend, on: "Trend ON", off: "Trend OFF" },
+    { btn: presetToggleMiniBtn, enabled: chartDisplaySettings.showMiniTape, on: "Mini Tape ON", off: "Mini Tape OFF" },
+  ];
+  mappings.forEach((item) => {
+    if (!item.btn) return;
+    item.btn.classList.toggle("active", item.enabled);
+    item.btn.textContent = item.enabled ? item.on : item.off;
+  });
+
+  renderChartOrderflowMini(latestOrderflowPayload || {});
+}
+
+function setPresetStatus(text, tone = "") {
+  if (!presetStatusNode) return;
+  presetStatusNode.textContent = text;
+  presetStatusNode.classList.remove("pos", "neg");
+  if (tone === "pos") presetStatusNode.classList.add("pos");
+  if (tone === "neg") presetStatusNode.classList.add("neg");
+}
+
+function refreshPresetSelect() {
+  if (!presetSelectNode) return;
+  const store = getPresetStore();
+  const symbolKey = String(selectedSymbol || "").toUpperCase();
+  const symbolPresets = (store && typeof store === "object" ? store[symbolKey] : {}) || {};
+  const names = Object.keys(symbolPresets).sort();
+
+  presetSelectNode.innerHTML = `<option value="">-</option>${
+    names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
+  }`;
+}
+
+function saveCurrentPreset() {
+  const rawName = String(presetNameNode?.value || "").trim();
+  if (!rawName) {
+    setPresetStatus("Preset name is required.", "neg");
+    return;
+  }
+  const name = rawName.slice(0, 32);
+  const symbolKey = String(selectedSymbol || "").toUpperCase();
+  if (!symbolKey) return;
+
+  const store = getPresetStore();
+  const next = { ...(store || {}) };
+  const symbolPresets = { ...(next[symbolKey] || {}) };
+  symbolPresets[name] = {
+    timeframe: selectedTimeframe,
+    showSr: chartDisplaySettings.showSr,
+    showTrend: chartDisplaySettings.showTrend,
+    showMiniTape: chartDisplaySettings.showMiniTape,
+  };
+  next[symbolKey] = symbolPresets;
+  savePresetStore(next);
+  refreshPresetSelect();
+  if (presetSelectNode) presetSelectNode.value = name;
+  setPresetStatus(`Preset "${name}" saved for ${symbolKey}.`, "pos");
+}
+
+function applyPresetByName(name) {
+  const safeName = String(name || "").trim();
+  if (!safeName) {
+    setPresetStatus("Select preset to load.", "neg");
+    return;
+  }
+  const store = getPresetStore();
+  const symbolKey = String(selectedSymbol || "").toUpperCase();
+  const preset = store?.[symbolKey]?.[safeName];
+  if (!preset || typeof preset !== "object") {
+    setPresetStatus(`Preset "${safeName}" not found for ${symbolKey}.`, "neg");
+    return;
+  }
+
+  chartDisplaySettings.showSr = Boolean(preset.showSr);
+  chartDisplaySettings.showTrend = Boolean(preset.showTrend);
+  chartDisplaySettings.showMiniTape = Boolean(preset.showMiniTape);
+  applyChartSettingButtons();
+
+  const timeframe = String(preset.timeframe || "").trim();
+  if (timeframe && timeframe !== selectedTimeframe) {
+    selectedTimeframe = timeframe;
+    setActiveTimeframeButton(selectedTimeframe);
+    armChartAutoFit();
+    sendViewUpdate();
+  }
+
+  refreshChartDecorations();
+  updateChartOverlay();
+  setPresetStatus(`Preset "${safeName}" loaded.`, "pos");
+}
+
+function deletePresetByName(name) {
+  const safeName = String(name || "").trim();
+  if (!safeName) {
+    setPresetStatus("Select preset to delete.", "neg");
+    return;
+  }
+  const symbolKey = String(selectedSymbol || "").toUpperCase();
+  const store = getPresetStore();
+  if (!store?.[symbolKey]?.[safeName]) {
+    setPresetStatus(`Preset "${safeName}" not found for ${symbolKey}.`, "neg");
+    return;
+  }
+  const symbolPresets = { ...store[symbolKey] };
+  delete symbolPresets[safeName];
+  const next = { ...store, [symbolKey]: symbolPresets };
+  savePresetStore(next);
+  refreshPresetSelect();
+  if (presetSelectNode) presetSelectNode.value = "";
+  setPresetStatus(`Preset "${safeName}" deleted.`, "pos");
+}
+
+function getBuilderRuleStore() {
+  return loadStoredObject(ALERT_BUILDER_RULES_KEY, []);
+}
+
+function saveBuilderRuleStore() {
+  saveStoredObject(ALERT_BUILDER_RULES_KEY, builderRules);
+}
+
+function updateBuilderConditionOptions() {
+  if (!builderRuleTypeNode || !builderConditionNode) return;
+  const type = String(builderRuleTypeNode.value || "ema_cross");
+  const options = ALERT_BUILDER_RULE_OPTIONS[type] || ALERT_BUILDER_RULE_OPTIONS.ema_cross;
+  builderConditionNode.innerHTML = options
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+
+  const first = options[0]?.value || "";
+  if (type === "ema_cross") {
+    if (builderThresholdNode) {
+      builderThresholdNode.value = "0.03";
+      builderThresholdNode.step = "0.01";
+      builderThresholdNode.min = "0";
+      builderThresholdNode.max = "2";
+    }
+  } else if (type === "rsi_zone") {
+    if (builderThresholdNode) {
+      builderThresholdNode.value = first === "rsi_oversold" ? "30" : "70";
+      builderThresholdNode.step = "1";
+      builderThresholdNode.min = "1";
+      builderThresholdNode.max = "99";
+    }
+  } else if (builderThresholdNode) {
+    builderThresholdNode.value = "20";
+    builderThresholdNode.step = "1";
+    builderThresholdNode.min = "5";
+    builderThresholdNode.max = "200";
+  }
+}
+
+function renderBuilderRules() {
+  if (!builderRulesListNode) return;
+  if (!Array.isArray(builderRules) || builderRules.length === 0) {
+    builderRulesListNode.innerHTML = `
+      <article class="alert-item">
+        <div class="alert-title">No builder rules yet</div>
+        <div class="alert-msg">Create EMA/RSI/Breakout rule and it will trigger in real time for selected symbol.</div>
+      </article>
+    `;
+    return;
+  }
+
+  builderRulesListNode.innerHTML = [...builderRules]
+    .reverse()
+    .map((rule) => {
+      const ruleType = String(rule.ruleType || "").toUpperCase();
+      const condition = String(rule.condition || "-").replaceAll("_", " ").toUpperCase();
+      const threshold = Number(rule.threshold);
+      const cooldownSec = Number(rule.cooldownSec);
+      const symbol = escapeHtml(rule.symbol || "-");
+      const id = escapeHtml(rule.id || "-");
+      const thresholdText = Number.isFinite(threshold) ? fmtNumber(threshold, 2) : "-";
+      const cooldownText = Number.isFinite(cooldownSec) ? `${fmtNumber(cooldownSec, 0)}s` : "-";
+      const lastHit = Number(rule.lastTriggeredAt);
+      const lastHitText = Number.isFinite(lastHit) && lastHit > 0
+        ? new Date(lastHit).toLocaleTimeString()
+        : "never";
+
+      return `
+        <article class="alert-item low">
+          <div class="alert-head">
+            <span>${symbol}</span>
+            <button class="toggle-btn" data-builder-remove="${id}" type="button">Remove</button>
+          </div>
+          <div class="alert-title">${escapeHtml(ruleType)} • ${escapeHtml(condition)}</div>
+          <div class="alert-msg">Threshold ${thresholdText} • Cooldown ${cooldownText} • Last hit ${escapeHtml(lastHitText)}</div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function addLocalAlert(alert) {
+  localAlertCounter += 1;
+  localAlerts.push({
+    id: localAlertCounter,
+    timestamp: intNow(),
+    symbol: alert.symbol || selectedSymbol,
+    type: alert.type || "builder_local",
+    title: alert.title || "Builder Alert",
+    message: alert.message || "",
+    severity: alert.severity || "medium",
+    meta: alert.meta || {},
+  });
+  if (localAlerts.length > 120) {
+    localAlerts = localAlerts.slice(-120);
+  }
+  handleIncomingAlerts(latestServerAlerts);
+}
+
+function intNow() {
+  return Math.floor(Date.now() / 1000);
+}
+
+async function notifyBuilderTelegram(payload) {
+  if (!builderTelegramEnabled) return;
+  try {
+    await fetch("/api/alert-builder/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // best effort only
+  }
+}
+
+function triggerBuilderRule(rule, title, message, severity = "medium", extraMeta = {}) {
+  const nowMs = Date.now();
+  rule.lastTriggeredAt = nowMs;
+  saveBuilderRuleStore();
+  renderBuilderRules();
+
+  const payload = {
+    symbol: rule.symbol || selectedSymbol,
+    type: `builder_${rule.ruleType || "rule"}`,
+    title,
+    message,
+    severity,
+    meta: {
+      event: "ALERT_BUILDER",
+      rule_type: rule.ruleType,
+      condition: rule.condition,
+      threshold: rule.threshold,
+      ...extraMeta,
+    },
+  };
+  addLocalAlert(payload);
+  notifyBuilderTelegram(payload);
+}
+
+function evaluateBuilderRules(chart, summary) {
+  if (!Array.isArray(builderRules) || builderRules.length === 0) return;
+  if (!chart || typeof chart !== "object") return;
+  if (replayState.active) return;
+
+  const symbol = String(chart.symbol || selectedSymbol || "");
+  const candles = Array.isArray(chart.candles) ? chart.candles : [];
+  if (candles.length < 3) return;
+
+  const lastCandle = candles[candles.length - 1];
+  const prevCandle = candles[candles.length - 2];
+  const lastTime = normalizeChartTime(lastCandle?.time);
+  const prevTime = normalizeChartTime(prevCandle?.time);
+  const lastClose = Number(lastCandle?.close);
+  const prevClose = Number(prevCandle?.close);
+  if (!Number.isFinite(lastTime) || !Number.isFinite(prevTime)) return;
+
+  const ema20Map = createSeriesValueMap(chart.ema20);
+  const ema50Map = createSeriesValueMap(chart.ema50);
+  const rsiMap = createSeriesValueMap(chart.rsi);
+  const lastEma20 = Number(ema20Map.get(lastTime));
+  const lastEma50 = Number(ema50Map.get(lastTime));
+  const prevEma20 = Number(ema20Map.get(prevTime));
+  const prevEma50 = Number(ema50Map.get(prevTime));
+  const lastRsi = Number.isFinite(Number(summary?.rsi))
+    ? Number(summary.rsi)
+    : Number(rsiMap.get(lastTime));
+  const prevRsi = Number(rsiMap.get(prevTime));
+
+  builderRules.forEach((rule) => {
+    if (String(rule.symbol || "").toUpperCase() !== symbol.toUpperCase()) return;
+    const cooldownMs = Math.max(5000, (Number(rule.cooldownSec) || 60) * 1000);
+    const lastHit = Number(rule.lastTriggeredAt || 0);
+    if (Date.now() - lastHit < cooldownMs) return;
+    if (Number(rule.lastTriggeredCandleTime || 0) === lastTime) return;
+
+    const threshold = Number(rule.threshold);
+    const type = String(rule.ruleType || "");
+    const condition = String(rule.condition || "");
+    let hit = false;
+    let hitMessage = "";
+    let severity = "medium";
+
+    if (type === "ema_cross") {
+      const gapPct = Number.isFinite(lastEma20) && Number.isFinite(lastEma50) && lastEma50 !== 0
+        ? Math.abs((lastEma20 - lastEma50) / lastEma50) * 100
+        : 0;
+      const minGapPct = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
+      const bullCross = (
+        Number.isFinite(prevEma20)
+        && Number.isFinite(prevEma50)
+        && Number.isFinite(lastEma20)
+        && Number.isFinite(lastEma50)
+        && prevEma20 <= prevEma50
+        && lastEma20 > lastEma50
+        && gapPct >= minGapPct
+      );
+      const bearCross = (
+        Number.isFinite(prevEma20)
+        && Number.isFinite(prevEma50)
+        && Number.isFinite(lastEma20)
+        && Number.isFinite(lastEma50)
+        && prevEma20 >= prevEma50
+        && lastEma20 < lastEma50
+        && gapPct >= minGapPct
+      );
+      if (condition === "bull_cross" && bullCross) {
+        hit = true;
+        severity = "high";
+        hitMessage = `EMA bull cross on ${symbol} (gap ${fmtNumber(gapPct, 3)}%)`;
+      } else if (condition === "bear_cross" && bearCross) {
+        hit = true;
+        severity = "high";
+        hitMessage = `EMA bear cross on ${symbol} (gap ${fmtNumber(gapPct, 3)}%)`;
+      }
+    } else if (type === "rsi_zone") {
+      const level = Number.isFinite(threshold) ? threshold : (condition === "rsi_oversold" ? 30 : 70);
+      const overboughtCross = Number.isFinite(prevRsi) && Number.isFinite(lastRsi) && prevRsi < level && lastRsi >= level;
+      const oversoldCross = Number.isFinite(prevRsi) && Number.isFinite(lastRsi) && prevRsi > level && lastRsi <= level;
+      if (condition === "rsi_overbought" && overboughtCross) {
+        hit = true;
+        hitMessage = `${symbol} RSI crossed above ${fmtNumber(level, 0)} (${fmtNumber(lastRsi, 2)})`;
+      } else if (condition === "rsi_oversold" && oversoldCross) {
+        hit = true;
+        hitMessage = `${symbol} RSI crossed below ${fmtNumber(level, 0)} (${fmtNumber(lastRsi, 2)})`;
+      }
+    } else if (type === "breakout") {
+      const lookback = clampValue(Math.floor(Number.isFinite(threshold) ? threshold : 20), 5, 200);
+      const lookbackCandles = candles.slice(Math.max(0, candles.length - lookback - 1), candles.length - 1);
+      const highLevel = lookbackCandles.reduce((max, candle) => {
+        const value = Number(candle?.high);
+        return Number.isFinite(value) ? Math.max(max, value) : max;
+      }, Number.NEGATIVE_INFINITY);
+      const lowLevel = lookbackCandles.reduce((min, candle) => {
+        const value = Number(candle?.low);
+        return Number.isFinite(value) ? Math.min(min, value) : min;
+      }, Number.POSITIVE_INFINITY);
+      const breakoutUp = Number.isFinite(prevClose) && Number.isFinite(lastClose) && Number.isFinite(highLevel)
+        && prevClose <= highLevel && lastClose > highLevel;
+      const breakoutDown = Number.isFinite(prevClose) && Number.isFinite(lastClose) && Number.isFinite(lowLevel)
+        && prevClose >= lowLevel && lastClose < lowLevel;
+      if (condition === "breakout_up" && breakoutUp) {
+        hit = true;
+        severity = "high";
+        hitMessage = `${symbol} breakout UP above ${fmtPrice(highLevel)} (N=${lookback})`;
+      } else if (condition === "breakout_down" && breakoutDown) {
+        hit = true;
+        severity = "high";
+        hitMessage = `${symbol} breakout DOWN below ${fmtPrice(lowLevel)} (N=${lookback})`;
+      }
+    }
+
+    if (hit) {
+      rule.lastTriggeredCandleTime = lastTime;
+      triggerBuilderRule(
+        rule,
+        `${symbol} ${String(type || "rule").replaceAll("_", " ").toUpperCase()}`,
+        hitMessage,
+        severity,
+      );
+    }
+  });
+}
+
+function addBuilderRule() {
+  const ruleType = String(builderRuleTypeNode?.value || "ema_cross");
+  const condition = String(builderConditionNode?.value || "");
+  const threshold = Number(builderThresholdNode?.value);
+  const cooldownSec = Math.max(5, Number(builderCooldownNode?.value) || 60);
+  if (!condition) return;
+
+  builderRuleCounter += 1;
+  builderRules.push({
+    id: `rule-${Date.now()}-${builderRuleCounter}`,
+    symbol: selectedSymbol,
+    ruleType,
+    condition,
+    threshold: Number.isFinite(threshold) ? threshold : 0,
+    cooldownSec,
+    lastTriggeredAt: 0,
+    lastTriggeredCandleTime: 0,
+  });
+  if (builderRules.length > 60) builderRules = builderRules.slice(-60);
+  saveBuilderRuleStore();
+  renderBuilderRules();
+}
+
+function clearBuilderRules() {
+  builderRules = [];
+  saveBuilderRuleStore();
+  renderBuilderRules();
+}
+
+function toggleBuilderTelegram() {
+  builderTelegramEnabled = !builderTelegramEnabled;
+  if (builderTelegramToggleBtn) {
+    builderTelegramToggleBtn.classList.toggle("active", builderTelegramEnabled);
+    builderTelegramToggleBtn.textContent = builderTelegramEnabled ? "Telegram ON" : "Telegram OFF";
+  }
+}
+
+function hydrateBuilderRulesFromStorage() {
+  const loaded = getBuilderRuleStore();
+  if (!Array.isArray(loaded)) return;
+  builderRules = loaded
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({
+      id: String(item.id || `rule-${Date.now()}-${Math.random()}`),
+      symbol: String(item.symbol || selectedSymbol),
+      ruleType: String(item.ruleType || "ema_cross"),
+      condition: String(item.condition || "bull_cross"),
+      threshold: Number(item.threshold) || 0,
+      cooldownSec: Math.max(5, Number(item.cooldownSec) || 60),
+      lastTriggeredAt: Number(item.lastTriggeredAt) || 0,
+      lastTriggeredCandleTime: Number(item.lastTriggeredCandleTime) || 0,
+    }));
+  builderRuleCounter = builderRules.length;
+}
+
 function armChartAutoFit() {
   chartAutoFitArmed = true;
 }
@@ -808,6 +1865,182 @@ function addChartPriceLine(price, title, color, lineStyle = 2) {
     title,
   });
   chartPriceLines.push(line);
+}
+
+function buildSwingStructure(chart) {
+  const candles = Array.isArray(chart?.candles) ? chart.candles : [];
+  if (candles.length < 12) {
+    return {
+      supports: [],
+      resistances: [],
+      upTrendLine: [],
+      downTrendLine: [],
+      trendBias: "HOLD",
+      lastClose: Number.NaN,
+    };
+  }
+
+  const normalized = candles
+    .map((point, index) => ({
+      index,
+      time: normalizeChartTime(point?.time),
+      high: Number(point?.high),
+      low: Number(point?.low),
+      close: Number(point?.close),
+    }))
+    .filter((point) => (
+      Number.isFinite(point.time)
+      && Number.isFinite(point.high)
+      && Number.isFinite(point.low)
+      && Number.isFinite(point.close)
+    ));
+
+  if (normalized.length < 12) {
+    return {
+      supports: [],
+      resistances: [],
+      upTrendLine: [],
+      downTrendLine: [],
+      trendBias: "HOLD",
+      lastClose: Number.NaN,
+    };
+  }
+
+  const tfSeconds = timeframeToSeconds(latestChartTimeframe);
+  const span = tfSeconds <= 60 ? 2 : tfSeconds <= 300 ? 3 : 4;
+  const swingHighs = [];
+  const swingLows = [];
+
+  for (let i = span; i < normalized.length - span; i += 1) {
+    const center = normalized[i];
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - span; j <= i + span; j += 1) {
+      if (j === i) continue;
+      const probe = normalized[j];
+      if (probe.high >= center.high) isHigh = false;
+      if (probe.low <= center.low) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) {
+      swingHighs.push({ index: center.index, time: center.time, price: center.high });
+    }
+    if (isLow) {
+      swingLows.push({ index: center.index, time: center.time, price: center.low });
+    }
+  }
+
+  const lastClose = normalized[normalized.length - 1]?.close;
+  const selectLevels = (items, { type, currentPrice }) => {
+    const safeItems = Array.isArray(items) ? items : [];
+    if (safeItems.length === 0) return [];
+
+    const sortedByTime = [...safeItems].sort((a, b) => a.time - b.time);
+    const pool = Number.isFinite(currentPrice)
+      ? sortedByTime.filter((item) => (
+        type === "support" ? item.price <= currentPrice : item.price >= currentPrice
+      ))
+      : sortedByTime;
+    const fallbackPool = pool.length > 0 ? pool : sortedByTime;
+    const latestFirst = [...fallbackPool].sort((a, b) => b.time - a.time);
+
+    const selected = [];
+    for (let i = 0; i < latestFirst.length; i += 1) {
+      const candidate = latestFirst[i];
+      const tooClose = selected.some((picked) => {
+        const denom = Math.max(1e-9, picked.price);
+        return Math.abs((candidate.price - picked.price) / denom) < 0.0015;
+      });
+      if (tooClose) continue;
+      selected.push(candidate);
+      if (selected.length >= 2) break;
+    }
+
+    return selected
+      .sort((a, b) => (type === "support" ? b.price - a.price : a.price - b.price))
+      .map((item) => item.price);
+  };
+
+  const supports = selectLevels(swingLows, { type: "support", currentPrice: lastClose });
+  const resistances = selectLevels(swingHighs, { type: "resistance", currentPrice: lastClose });
+
+  const buildTrendLine = (items, direction) => {
+    if (!Array.isArray(items) || items.length < 2) return [];
+    const ordered = [...items].sort((a, b) => a.time - b.time);
+    const lastTime = normalized[normalized.length - 1]?.time;
+    if (!Number.isFinite(lastTime)) return [];
+
+    for (let i = ordered.length - 1; i > 0; i -= 1) {
+      const p2 = ordered[i];
+      const p1 = ordered[i - 1];
+      const upMove = p2.price > p1.price;
+      const downMove = p2.price < p1.price;
+      if ((direction === "up" && !upMove) || (direction === "down" && !downMove)) continue;
+
+      const dt = p2.time - p1.time;
+      if (!Number.isFinite(dt) || dt <= 0) continue;
+      const slope = (p2.price - p1.price) / dt;
+      const extendedPrice = p2.price + slope * (lastTime - p2.time);
+      if (!Number.isFinite(extendedPrice) || extendedPrice <= 0) continue;
+
+      return [
+        { time: p1.time, value: p1.price },
+        { time: lastTime, value: extendedPrice },
+      ];
+    }
+    return [];
+  };
+
+  const upTrendLine = buildTrendLine(swingLows, "up");
+  const downTrendLine = buildTrendLine(swingHighs, "down");
+  const trendBias = upTrendLine.length > 0 && downTrendLine.length === 0
+    ? "UP"
+    : downTrendLine.length > 0 && upTrendLine.length === 0
+      ? "DOWN"
+      : upTrendLine.length > 0 && downTrendLine.length > 0
+        ? "MIXED"
+        : "HOLD";
+
+  return {
+    supports,
+    resistances,
+    upTrendLine,
+    downTrendLine,
+    trendBias,
+    lastClose: Number.isFinite(lastClose) ? lastClose : Number.NaN,
+  };
+}
+
+function drawSwingStructure(structure) {
+  if (!structure || typeof structure !== "object") return;
+
+  if (trendUpSeries) {
+    trendUpSeries.setData(
+      chartDisplaySettings.showTrend && Array.isArray(structure.upTrendLine)
+        ? structure.upTrendLine
+        : [],
+    );
+  }
+  if (trendDownSeries) {
+    trendDownSeries.setData(
+      chartDisplaySettings.showTrend && Array.isArray(structure.downTrendLine)
+        ? structure.downTrendLine
+        : [],
+    );
+  }
+
+  if (!chartDisplaySettings.showSr) return;
+
+  const supports = Array.isArray(structure.supports) ? structure.supports : [];
+  const resistances = Array.isArray(structure.resistances) ? structure.resistances : [];
+  supports.forEach((price, idx) => {
+    if (!Number.isFinite(price) || price <= 0) return;
+    addChartPriceLine(price, `S${idx + 1}`, "#22c55e", 2);
+  });
+  resistances.forEach((price, idx) => {
+    if (!Number.isFinite(price) || price <= 0) return;
+    addChartPriceLine(price, `R${idx + 1}`, "#f97316", 2);
+  });
 }
 
 function rebuildChartSeriesLookup(chart) {
@@ -884,7 +2117,7 @@ function markerForJournalEntry(entry) {
       position: side === "SHORT" ? "belowBar" : "aboveBar",
       shape: "circle",
       color: isProfit ? "#10b981" : "#ef4444",
-      text: "PARTIAL",
+      text: "TP1",
     };
   }
 
@@ -895,6 +2128,30 @@ function markerForJournalEntry(entry) {
         shape: "square",
         color: "#f59e0b",
         text: "TIME STOP",
+      };
+    }
+    if (reason.includes("STOP LOSS") || reason.includes("SL")) {
+      return {
+        position: side === "SHORT" ? "belowBar" : "aboveBar",
+        shape: "square",
+        color: "#ef4444",
+        text: "SL",
+      };
+    }
+    if (reason.includes("BREAK EVEN")) {
+      return {
+        position: side === "SHORT" ? "belowBar" : "aboveBar",
+        shape: "square",
+        color: "#f59e0b",
+        text: "BE",
+      };
+    }
+    if (reason.includes("TAKE PROFIT") || reason.includes("TP")) {
+      return {
+        position: side === "SHORT" ? "belowBar" : "aboveBar",
+        shape: "arrowDown",
+        color: "#22c55e",
+        text: "TP2",
       };
     }
     return {
@@ -1015,14 +2272,44 @@ function drawPositionGuides(autoTrade) {
   }
 }
 
+function drawReplayPositionGuides() {
+  clearChartPriceLines();
+  if (!replayState.active || !replayState.position) return;
+
+  const position = replayState.position;
+  const side = String(position.side || "LONG").toUpperCase();
+  const entryPrice = Number(position.entryPrice);
+  const tpPrice = Number(position.tpPrice);
+  const slPrice = Number(position.slPrice);
+
+  if (Number.isFinite(entryPrice) && entryPrice > 0) addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 2);
+  if (Number.isFinite(tpPrice) && tpPrice > 0) addChartPriceLine(tpPrice, "TP2", "#22c55e", 0);
+  if (Number.isFinite(slPrice) && slPrice > 0) addChartPriceLine(slPrice, "SL", "#ef4444", 0);
+  if (side === "SHORT" && Number.isFinite(entryPrice)) {
+    // Keep short side visually explicit during replay.
+    addChartPriceLine(entryPrice, "SHORT", "#f97316", 1);
+  }
+}
+
 function refreshChartDecorations() {
   if (!candleSeries || !latestChartPayload) {
     clearChartPriceLines();
+    latestStructure = null;
+    if (trendUpSeries) trendUpSeries.setData([]);
+    if (trendDownSeries) trendDownSeries.setData([]);
     return;
   }
-  const markers = buildTradeMarkers(latestChartPayload, latestAutoTrade);
-  candleSeries.setMarkers(markers);
-  drawPositionGuides(latestAutoTrade);
+
+  if (replayState.active) {
+    candleSeries.setMarkers(Array.isArray(replayState.markers) ? replayState.markers : []);
+    drawReplayPositionGuides();
+  } else {
+    const markers = buildTradeMarkers(latestChartPayload, latestAutoTrade);
+    candleSeries.setMarkers(markers);
+    drawPositionGuides(latestAutoTrade);
+  }
+  latestStructure = buildSwingStructure(latestChartPayload);
+  drawSwingStructure(latestStructure);
 }
 
 function setupCrosshairSync() {
@@ -1159,6 +2446,22 @@ function initCharts() {
     lastValueVisible: false,
     crosshairMarkerVisible: false,
   });
+  trendUpSeries = priceChart.addLineSeries({
+    color: "rgba(34, 197, 94, 0.75)",
+    lineWidth: 2,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  trendDownSeries = priceChart.addLineSeries({
+    color: "rgba(249, 115, 22, 0.75)",
+    lineWidth: 2,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
 
   volumeSeries = priceChart.addHistogramSeries({
     priceFormat: { type: "volume" },
@@ -1194,6 +2497,8 @@ function initCharts() {
 
 function renderChart(chart) {
   if (!chart) return;
+  latestLiveChartPayload = chart;
+  if (replayState.active) return;
   latestChartPayload = chart;
   latestChartTimeframe = String(chart.timeframe || selectedTimeframe || "1m");
 
@@ -2325,7 +3630,10 @@ function sendBrowserNotifications(newAlerts) {
 }
 
 function handleIncomingAlerts(alerts) {
-  allAlerts = Array.isArray(alerts) ? alerts : [];
+  latestServerAlerts = Array.isArray(alerts) ? alerts : [];
+  allAlerts = [...latestServerAlerts, ...localAlerts].sort(
+    (a, b) => Number(a.id || 0) - Number(b.id || 0),
+  );
   const visibleAlerts = getVisibleAlerts();
 
   const newAlerts = visibleAlerts.filter((alert) => {
@@ -2378,6 +3686,9 @@ function handleSnapshot(payload) {
   if (selectedSymbol !== previousSymbol || selectedTimeframe !== previousTimeframe) {
     armChartAutoFit();
   }
+  if (selectedSymbol !== previousSymbol) {
+    refreshPresetSelect();
+  }
 
   marketRows = Array.isArray(payload.market) ? payload.market : [];
   renderWatchlist(marketRows);
@@ -2389,6 +3700,7 @@ function handleSnapshot(payload) {
   updateStats(summary);
 
   renderChart(payload.chart);
+  evaluateBuilderRules(payload.chart, summary);
   handleIncomingAlerts(payload.alerts);
   renderAutoTrade(payload.auto_trade);
 
@@ -2465,7 +3777,9 @@ function connectWebSocket() {
 }
 
 symbolSelect.addEventListener("change", () => {
+  if (replayState.active) resetReplayMode();
   selectedSymbol = symbolSelect.value;
+  refreshPresetSelect();
   renderWatchlist(marketRows);
   armChartAutoFit();
   sendViewUpdate();
@@ -2476,6 +3790,7 @@ timeframeButtons.forEach((button) => {
     const timeframe = button.dataset.timeframe;
     if (!timeframe || timeframe === selectedTimeframe) return;
 
+    if (replayState.active) resetReplayMode();
     selectedTimeframe = timeframe;
     setActiveTimeframeButton(selectedTimeframe);
     armChartAutoFit();
@@ -2521,7 +3836,8 @@ toggleBrowserAlertBtn.addEventListener("click", async () => {
 });
 
 clearAlertsBtn.addEventListener("click", () => {
-  const maxId = allAlerts.reduce((max, alert) => {
+  localAlerts = [];
+  const maxId = latestServerAlerts.reduce((max, alert) => {
     const id = Number(alert.id || 0);
     return id > max ? id : max;
   }, alertCutoffId);
@@ -2530,8 +3846,137 @@ clearAlertsBtn.addEventListener("click", () => {
   seenAlertIds = new Set(
     Array.from(seenAlertIds).filter((id) => id > alertCutoffId),
   );
-  renderAlerts();
+  handleIncomingAlerts(latestServerAlerts);
 });
+
+if (builderRuleTypeNode) {
+  builderRuleTypeNode.addEventListener("change", () => {
+    updateBuilderConditionOptions();
+  });
+}
+
+if (builderConditionNode) {
+  builderConditionNode.addEventListener("change", () => {
+    const type = String(builderRuleTypeNode?.value || "ema_cross");
+    const condition = String(builderConditionNode.value || "");
+    if (!builderThresholdNode) return;
+    if (type === "rsi_zone") {
+      builderThresholdNode.value = condition === "rsi_oversold" ? "30" : "70";
+    }
+  });
+}
+
+if (builderTelegramToggleBtn) {
+  builderTelegramToggleBtn.addEventListener("click", () => {
+    toggleBuilderTelegram();
+  });
+}
+
+if (builderAddRuleBtn) {
+  builderAddRuleBtn.addEventListener("click", () => {
+    addBuilderRule();
+  });
+}
+
+if (builderClearRulesBtn) {
+  builderClearRulesBtn.addEventListener("click", () => {
+    clearBuilderRules();
+  });
+}
+
+if (builderRulesListNode) {
+  builderRulesListNode.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const removeId = String(target.dataset.builderRemove || "").trim();
+    if (!removeId) return;
+    builderRules = builderRules.filter((rule) => String(rule.id) !== removeId);
+    saveBuilderRuleStore();
+    renderBuilderRules();
+  });
+}
+
+if (replayStartBtn) {
+  replayStartBtn.addEventListener("click", () => {
+    startReplayMode();
+  });
+}
+
+if (replayPlayBtn) {
+  replayPlayBtn.addEventListener("click", () => {
+    toggleReplayPlay();
+  });
+}
+
+if (replayStepBtn) {
+  replayStepBtn.addEventListener("click", () => {
+    if (!replayState.active) startReplayMode();
+    if (!replayState.active) return;
+    advanceReplayStep();
+  });
+}
+
+if (replayResetBtn) {
+  replayResetBtn.addEventListener("click", () => {
+    resetReplayMode();
+  });
+}
+
+if (presetToggleSrBtn) {
+  presetToggleSrBtn.addEventListener("click", () => {
+    chartDisplaySettings.showSr = !chartDisplaySettings.showSr;
+    applyChartSettingButtons();
+    refreshChartDecorations();
+    updateChartOverlay();
+  });
+}
+
+if (presetToggleTrendBtn) {
+  presetToggleTrendBtn.addEventListener("click", () => {
+    chartDisplaySettings.showTrend = !chartDisplaySettings.showTrend;
+    applyChartSettingButtons();
+    refreshChartDecorations();
+    updateChartOverlay();
+  });
+}
+
+if (presetToggleMiniBtn) {
+  presetToggleMiniBtn.addEventListener("click", () => {
+    chartDisplaySettings.showMiniTape = !chartDisplaySettings.showMiniTape;
+    applyChartSettingButtons();
+    renderChartOrderflowMini(latestOrderflowPayload || {});
+  });
+}
+
+if (presetSaveBtn) {
+  presetSaveBtn.addEventListener("click", () => {
+    saveCurrentPreset();
+  });
+}
+
+if (presetSelectNode) {
+  presetSelectNode.addEventListener("change", () => {
+    if (!presetNameNode) return;
+    const selected = String(presetSelectNode.value || "").trim();
+    if (selected) presetNameNode.value = selected;
+  });
+}
+
+if (presetLoadBtn) {
+  presetLoadBtn.addEventListener("click", () => {
+    const fallback = String(presetNameNode?.value || "").trim();
+    const selected = String(presetSelectNode?.value || "").trim() || fallback;
+    applyPresetByName(selected);
+  });
+}
+
+if (presetDeleteBtn) {
+  presetDeleteBtn.addEventListener("click", () => {
+    const fallback = String(presetNameNode?.value || "").trim();
+    const selected = String(presetSelectNode?.value || "").trim() || fallback;
+    deletePresetByName(selected);
+  });
+}
 
 if (exportJournalCsvBtn) {
   exportJournalCsvBtn.addEventListener("click", () => {
@@ -2541,6 +3986,12 @@ if (exportJournalCsvBtn) {
 }
 
 try {
+  hydrateBuilderRulesFromStorage();
+  updateBuilderConditionOptions();
+  renderBuilderRules();
+  refreshPresetSelect();
+  applyChartSettingButtons();
+  resetReplayUi();
   initCharts();
   renderAlerts();
   renderAutoTrade({});
