@@ -471,13 +471,14 @@
       flex-wrap: wrap;
       gap: 6px;
       pointer-events: none;
+      max-width: 48%;
     }
 
     .chart-overlay-chip {
       padding: 4px 8px;
       border-radius: 999px;
       border: 1px solid rgba(148, 163, 184, 0.34);
-      background: rgba(8, 17, 39, 0.84);
+      background: #081127;
       color: var(--muted);
       font-size: 11px;
       line-height: 1.1;
@@ -556,14 +557,14 @@
       justify-content: flex-end;
       gap: 6px;
       pointer-events: none;
-      max-width: 52%;
+      max-width: 48%;
     }
 
     .mtf-chip {
       padding: 4px 8px;
       border-radius: 999px;
       border: 1px solid rgba(148, 163, 184, 0.34);
-      background: rgba(8, 17, 39, 0.84);
+      background: #081127;
       color: var(--muted);
       font-size: 11px;
       line-height: 1.1;
@@ -1043,6 +1044,15 @@
 
       .chart-orderflow-mini {
         width: calc(100% - 16px);
+      }
+
+      .chart-overlay,
+      .chart-mtf-ribbon {
+        max-width: 100%;
+      }
+
+      .chart-mtf-ribbon {
+        top: 38px;
       }
     }
   </style>
