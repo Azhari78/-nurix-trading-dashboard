@@ -224,6 +224,13 @@ let macdSignalSeries;
 let macdHistogramSeries;
 
 let latestStructure = null;
+const CHART_CLEAN_MODE = {
+  hideMouseCrosshair: true,
+  showVwapBands: false,
+  showOnlyPrimarySr: true,
+  showTp1Guide: false,
+  showBreakEvenGuide: false,
+};
 const DASHBOARD_VIEW_MODE_KEY = "nurix.dashboard.view.mode.v1";
 const ALERT_BUILDER_RULES_KEY = "nurix.alert.builder.rules.v1";
 const CHART_PRESETS_KEY = "nurix.chart.presets.v1";
@@ -1117,10 +1124,10 @@ function renderReplaySlice() {
   ema20Series.setData(replayChart.ema20 || []);
   ema50Series.setData(replayChart.ema50 || []);
   vwapSessionSeries.setData(replayChart.vwap_session || []);
-  vwapUpper1Series.setData(replayChart.vwap_upper_1 || []);
-  vwapLower1Series.setData(replayChart.vwap_lower_1 || []);
-  vwapUpper2Series.setData(replayChart.vwap_upper_2 || []);
-  vwapLower2Series.setData(replayChart.vwap_lower_2 || []);
+  vwapUpper1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_upper_1 || []) : []);
+  vwapLower1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_lower_1 || []) : []);
+  vwapUpper2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_upper_2 || []) : []);
+  vwapLower2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_lower_2 || []) : []);
   volumeSeries.setData(replayChart.volume || []);
   rsiSeries.setData(replayChart.rsi || []);
   rsiUpperSeries.setData((replayChart.rsi || []).map((point) => ({ time: point.time, value: 70 })));
@@ -1882,6 +1889,14 @@ function baseChartOptions(height) {
     },
     crosshair: {
       mode: 0,
+      vertLine: {
+        visible: !CHART_CLEAN_MODE.hideMouseCrosshair,
+        labelVisible: false,
+      },
+      horzLine: {
+        visible: !CHART_CLEAN_MODE.hideMouseCrosshair,
+        labelVisible: false,
+      },
     },
   };
 }
@@ -2075,8 +2090,10 @@ function drawSwingStructure(structure) {
 
   if (!chartDisplaySettings.showSr) return;
 
-  const supports = Array.isArray(structure.supports) ? structure.supports : [];
-  const resistances = Array.isArray(structure.resistances) ? structure.resistances : [];
+  const supportsRaw = Array.isArray(structure.supports) ? structure.supports : [];
+  const resistancesRaw = Array.isArray(structure.resistances) ? structure.resistances : [];
+  const supports = CHART_CLEAN_MODE.showOnlyPrimarySr ? supportsRaw.slice(0, 1) : supportsRaw;
+  const resistances = CHART_CLEAN_MODE.showOnlyPrimarySr ? resistancesRaw.slice(0, 1) : resistancesRaw;
   supports.forEach((price, idx) => {
     if (!Number.isFinite(price) || price <= 0) return;
     addChartPriceLine(price, `S${idx + 1}`, "#22c55e", 2);
@@ -2266,20 +2283,27 @@ function drawPositionGuides(autoTrade) {
   const breakEvenArmed = Boolean(position.break_even_armed);
   const breakEvenBufferPct = Number(autoTrade.break_even_buffer_pct);
 
-  addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 2);
+  addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 0);
   if (Number.isFinite(stopPct) && stopPct > 0) {
     const stopPrice = side === "SHORT"
       ? entryPrice * (1 + stopPct / 100)
       : entryPrice * (1 - stopPct / 100);
     addChartPriceLine(stopPrice, "SL", "#ef4444", 0);
   }
-  if (takeProfitRunEnabled && Number.isFinite(takeProfitRunMinPct) && takeProfitRunMinPct > 0) {
+  if (
+    CHART_CLEAN_MODE.showTp1Guide
+    && takeProfitRunEnabled
+    && Number.isFinite(takeProfitRunMinPct)
+    && takeProfitRunMinPct > 0
+  ) {
     const tpRunPrice = side === "SHORT"
       ? entryPrice * (1 - takeProfitRunMinPct / 100)
       : entryPrice * (1 + takeProfitRunMinPct / 100);
     addChartPriceLine(tpRunPrice, "TP1", "#16a34a", 0);
   }
   const showPartialTpLine = (
+    CHART_CLEAN_MODE.showTp1Guide
+    &&
     !takeProfitRunEnabled
     && partialTakeProfitEnabled
     && Number.isFinite(partialTakeProfitPct)
@@ -2308,7 +2332,12 @@ function drawPositionGuides(autoTrade) {
     const takeLineLabel = (takeProfitRunEnabled || showPartialTpLine) ? "TP2" : "TP";
     addChartPriceLine(takePrice, takeLineLabel, "#22c55e", 0);
   }
-  if (breakEvenEnabled && breakEvenArmed && Number.isFinite(breakEvenBufferPct)) {
+  if (
+    CHART_CLEAN_MODE.showBreakEvenGuide
+    && breakEvenEnabled
+    && breakEvenArmed
+    && Number.isFinite(breakEvenBufferPct)
+  ) {
     const bePrice = side === "SHORT"
       ? entryPrice * (1 - breakEvenBufferPct / 100)
       : entryPrice * (1 + breakEvenBufferPct / 100);
@@ -2321,18 +2350,13 @@ function drawReplayPositionGuides() {
   if (!replayState.active || !replayState.position) return;
 
   const position = replayState.position;
-  const side = String(position.side || "LONG").toUpperCase();
   const entryPrice = Number(position.entryPrice);
   const tpPrice = Number(position.tpPrice);
   const slPrice = Number(position.slPrice);
 
-  if (Number.isFinite(entryPrice) && entryPrice > 0) addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 2);
+  if (Number.isFinite(entryPrice) && entryPrice > 0) addChartPriceLine(entryPrice, "ENTRY", "#38bdf8", 0);
   if (Number.isFinite(tpPrice) && tpPrice > 0) addChartPriceLine(tpPrice, "TP2", "#22c55e", 0);
   if (Number.isFinite(slPrice) && slPrice > 0) addChartPriceLine(slPrice, "SL", "#ef4444", 0);
-  if (side === "SHORT" && Number.isFinite(entryPrice)) {
-    // Keep short side visually explicit during replay.
-    addChartPriceLine(entryPrice, "SHORT", "#f97316", 1);
-  }
 }
 
 function refreshChartDecorations() {
@@ -2550,10 +2574,10 @@ function renderChart(chart) {
   ema20Series.setData(chart.ema20 || []);
   ema50Series.setData(chart.ema50 || []);
   vwapSessionSeries.setData(chart.vwap_session || []);
-  vwapUpper1Series.setData(chart.vwap_upper_1 || []);
-  vwapLower1Series.setData(chart.vwap_lower_1 || []);
-  vwapUpper2Series.setData(chart.vwap_upper_2 || []);
-  vwapLower2Series.setData(chart.vwap_lower_2 || []);
+  vwapUpper1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_1 || []) : []);
+  vwapLower1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_1 || []) : []);
+  vwapUpper2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_2 || []) : []);
+  vwapLower2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_2 || []) : []);
   volumeSeries.setData(chart.volume || []);
 
   const rsiData = chart.rsi || [];
