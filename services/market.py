@@ -48,6 +48,30 @@ class MarketService:
         self._runtime_symbols = list(settings.symbols)
         self._symbol_validation_done = False
         self._engine_cycle_lock = threading.Lock()
+        self._profile_ema_spans: dict[str, tuple[int, int]] = {
+            "WEAK": (
+                int(settings.auto_trade_profile_weak_ema_fast),
+                int(settings.auto_trade_profile_weak_ema_slow),
+            ),
+            "MIDDLE": (
+                int(settings.auto_trade_profile_middle_ema_fast),
+                int(settings.auto_trade_profile_middle_ema_slow),
+            ),
+            "STRONG": (
+                int(settings.auto_trade_profile_strong_ema_fast),
+                int(settings.auto_trade_profile_strong_ema_slow),
+            ),
+        }
+        self._extra_ema_spans: tuple[int, ...] = tuple(
+            sorted(
+                {
+                    span
+                    for fast, slow in self._profile_ema_spans.values()
+                    for span in (fast, slow)
+                    if span not in {20, 50}
+                }
+            )
+        )
 
     @staticmethod
     def utc_day_key() -> str:
@@ -81,32 +105,48 @@ class MarketService:
     ) -> dict[str, float]:
         now = time.time()
         cache_key = f"{symbol}:{timeframe}"
+        weak_fast_span, weak_slow_span = self._profile_ema_spans["WEAK"]
+        middle_fast_span, middle_slow_span = self._profile_ema_spans["MIDDLE"]
+        strong_fast_span, strong_slow_span = self._profile_ema_spans["STRONG"]
+
+        def cached_float(source: dict[str, Any], key: str, fallback: float) -> float:
+            value = safe_float(source.get(key))
+            return float(value) if value is not None else float(fallback)
+
+        def map_cached(source: dict[str, Any]) -> dict[str, float]:
+            ema20 = float(source["ema20"])
+            ema50 = float(source["ema50"])
+            return {
+                "rsi": float(source["rsi"]),
+                "ema20": ema20,
+                "ema50": ema50,
+                "macd": float(source["macd"]),
+                "macd_signal": float(source["macd_signal"]),
+                "last_close": float(source["last_close"]),
+                "atr_pct": float(source.get("atr_pct") or 0.0),
+                "volume_ratio": float(source.get("volume_ratio") or 1.0),
+                "ema_weak_fast": cached_float(source, "ema_weak_fast", ema20),
+                "ema_weak_slow": cached_float(source, "ema_weak_slow", ema50),
+                "ema_middle_fast": cached_float(source, "ema_middle_fast", ema20),
+                "ema_middle_slow": cached_float(source, "ema_middle_slow", ema50),
+                "ema_strong_fast": cached_float(source, "ema_strong_fast", ema20),
+                "ema_strong_slow": cached_float(source, "ema_strong_slow", ema50),
+                "ema_weak_fast_span": float(weak_fast_span),
+                "ema_weak_slow_span": float(weak_slow_span),
+                "ema_middle_fast_span": float(middle_fast_span),
+                "ema_middle_slow_span": float(middle_slow_span),
+                "ema_strong_fast_span": float(strong_fast_span),
+                "ema_strong_slow_span": float(strong_slow_span),
+            }
+
         cached = self.state.indicator_cache.get(cache_key)
         if cached and now - cached.get("updated_at", 0.0) < self.settings.indicator_cache_seconds:
-            return {
-                "rsi": float(cached["rsi"]),
-                "ema20": float(cached["ema20"]),
-                "ema50": float(cached["ema50"]),
-                "macd": float(cached["macd"]),
-                "macd_signal": float(cached["macd_signal"]),
-                "last_close": float(cached["last_close"]),
-                "atr_pct": float(cached.get("atr_pct") or 0.0),
-                "volume_ratio": float(cached.get("volume_ratio") or 1.0),
-            }
+            return map_cached(cached)
 
         backoff_until = self._indicator_backoff_until.get(cache_key, 0.0)
         if backoff_until > now:
             if cached:
-                return {
-                    "rsi": float(cached["rsi"]),
-                    "ema20": float(cached["ema20"]),
-                    "ema50": float(cached["ema50"]),
-                    "macd": float(cached["macd"]),
-                    "macd_signal": float(cached["macd_signal"]),
-                    "last_close": float(cached["last_close"]),
-                    "atr_pct": float(cached.get("atr_pct") or 0.0),
-                    "volume_ratio": float(cached.get("volume_ratio") or 1.0),
-                }
+                return map_cached(cached)
             raise ValueError(
                 self._indicator_last_error.get(cache_key, "Indicator fetch in cooldown")
             )
@@ -129,16 +169,7 @@ class MarketService:
                     cache_key,
                     message[:140],
                 )
-                return {
-                    "rsi": float(cached["rsi"]),
-                    "ema20": float(cached["ema20"]),
-                    "ema50": float(cached["ema50"]),
-                    "macd": float(cached["macd"]),
-                    "macd_signal": float(cached["macd_signal"]),
-                    "last_close": float(cached["last_close"]),
-                    "atr_pct": float(cached.get("atr_pct") or 0.0),
-                    "volume_ratio": float(cached.get("volume_ratio") or 1.0),
-                }
+                return map_cached(cached)
             raise
 
         if not candles:
@@ -151,7 +182,7 @@ class MarketService:
             columns=["time", "open", "high", "low", "close", "volume"],
         )
         df = self.apply_live_price_to_latest_candle(df, symbol)
-        df = add_indicators(df)
+        df = add_indicators(df, extra_ema_spans=self._extra_ema_spans)
 
         last = df.iloc[-1]
         if (
@@ -175,21 +206,18 @@ class MarketService:
             "volume_ratio": (
                 float(last["volume_ratio"]) if pd.notna(last.get("volume_ratio")) else 1.0
             ),
+            "ema_weak_fast": float(last[self._ema_column(weak_fast_span)]),
+            "ema_weak_slow": float(last[self._ema_column(weak_slow_span)]),
+            "ema_middle_fast": float(last[self._ema_column(middle_fast_span)]),
+            "ema_middle_slow": float(last[self._ema_column(middle_slow_span)]),
+            "ema_strong_fast": float(last[self._ema_column(strong_fast_span)]),
+            "ema_strong_slow": float(last[self._ema_column(strong_slow_span)]),
         }
         self.state.indicator_cache[cache_key] = payload
         self._indicator_backoff_until.pop(cache_key, None)
         self._indicator_last_error.pop(cache_key, None)
 
-        return {
-            "rsi": payload["rsi"],
-            "ema20": payload["ema20"],
-            "ema50": payload["ema50"],
-            "macd": payload["macd"],
-            "macd_signal": payload["macd_signal"],
-            "last_close": payload["last_close"],
-            "atr_pct": payload["atr_pct"],
-            "volume_ratio": payload["volume_ratio"],
-        }
+        return map_cached(payload)
 
     def _effective_symbols(self) -> list[str]:
         if self._symbol_validation_done:
@@ -230,6 +258,10 @@ class MarketService:
         if score <= -1.0:
             return "SELL"
         return "HOLD"
+
+    @staticmethod
+    def _ema_column(span: int) -> str:
+        return f"ema{max(2, int(span))}"
 
     def build_mtf_bias_payload(
         self,
@@ -442,6 +474,18 @@ class MarketService:
                         "rsi": round(indicators["rsi"], 2),
                         "ema20": round(indicators["ema20"], 6),
                         "ema50": round(indicators["ema50"], 6),
+                        "ema_weak_fast": round(indicators["ema_weak_fast"], 6),
+                        "ema_weak_slow": round(indicators["ema_weak_slow"], 6),
+                        "ema_middle_fast": round(indicators["ema_middle_fast"], 6),
+                        "ema_middle_slow": round(indicators["ema_middle_slow"], 6),
+                        "ema_strong_fast": round(indicators["ema_strong_fast"], 6),
+                        "ema_strong_slow": round(indicators["ema_strong_slow"], 6),
+                        "ema_weak_fast_span": int(indicators["ema_weak_fast_span"]),
+                        "ema_weak_slow_span": int(indicators["ema_weak_slow_span"]),
+                        "ema_middle_fast_span": int(indicators["ema_middle_fast_span"]),
+                        "ema_middle_slow_span": int(indicators["ema_middle_slow_span"]),
+                        "ema_strong_fast_span": int(indicators["ema_strong_fast_span"]),
+                        "ema_strong_slow_span": int(indicators["ema_strong_slow_span"]),
                         "macd": round(indicators["macd"], 6),
                         "macd_signal": round(indicators["macd_signal"], 6),
                         "atr_pct": round(float(indicators.get("atr_pct") or 0.0), 3),
@@ -489,6 +533,18 @@ class MarketService:
                         "rsi": None,
                         "ema20": None,
                         "ema50": None,
+                        "ema_weak_fast": None,
+                        "ema_weak_slow": None,
+                        "ema_middle_fast": None,
+                        "ema_middle_slow": None,
+                        "ema_strong_fast": None,
+                        "ema_strong_slow": None,
+                        "ema_weak_fast_span": None,
+                        "ema_weak_slow_span": None,
+                        "ema_middle_fast_span": None,
+                        "ema_middle_slow_span": None,
+                        "ema_strong_fast_span": None,
+                        "ema_strong_slow_span": None,
                         "macd": None,
                         "macd_signal": None,
                         "atr_pct": None,
@@ -946,7 +1002,7 @@ class MarketService:
             columns=["time", "open", "high", "low", "close", "volume"],
         )
         df = self.apply_live_price_to_latest_candle(df, symbol)
-        df = add_indicators(df)
+        df = add_indicators(df, extra_ema_spans=self._extra_ema_spans)
         df = self.add_session_vwap_bands(df)
         mtf_bias = self.build_mtf_bias_payload(symbol)
 

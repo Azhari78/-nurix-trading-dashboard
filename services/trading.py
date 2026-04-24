@@ -1020,6 +1020,49 @@ class TradingService:
         side = str(value or "LONG").strip().upper()
         return side if side in {"LONG", "SHORT"} else "LONG"
 
+    @staticmethod
+    def _normalize_profile_name(value: Any) -> str:
+        name = str(value or "MIDDLE").strip().upper()
+        if name in {"WEAK", "DEFENSIVE"}:
+            return "WEAK"
+        if name in {"STRONG", "AGGRESSIVE"}:
+            return "STRONG"
+        return "MIDDLE"
+
+    def _ema_spans_for_profile(self, profile_name: str) -> tuple[int, int]:
+        normalized = self._normalize_profile_name(profile_name)
+        if normalized == "WEAK":
+            return (
+                int(self.settings.auto_trade_profile_weak_ema_fast),
+                int(self.settings.auto_trade_profile_weak_ema_slow),
+            )
+        if normalized == "STRONG":
+            return (
+                int(self.settings.auto_trade_profile_strong_ema_fast),
+                int(self.settings.auto_trade_profile_strong_ema_slow),
+            )
+        return (
+            int(self.settings.auto_trade_profile_middle_ema_fast),
+            int(self.settings.auto_trade_profile_middle_ema_slow),
+        )
+
+    def _ema_values_for_profile(
+        self,
+        row: dict[str, Any],
+        profile_name: str,
+    ) -> tuple[float | None, float | None, int, int]:
+        normalized = self._normalize_profile_name(profile_name)
+        fast_span, slow_span = self._ema_spans_for_profile(normalized)
+        row_key_prefix = normalized.lower()
+        ema_fast = safe_float(row.get(f"ema_{row_key_prefix}_fast"))
+        ema_slow = safe_float(row.get(f"ema_{row_key_prefix}_slow"))
+        if ema_fast is not None and ema_slow is not None:
+            return ema_fast, ema_slow, fast_span, slow_span
+
+        fallback_fast = safe_float(row.get("ema20"))
+        fallback_slow = safe_float(row.get("ema50"))
+        return fallback_fast, fallback_slow, 20, 50
+
     def _strategy_allows(self, side: str) -> bool:
         mode = self.settings.auto_trade_strategy_mode
         if mode == "long_only":
@@ -1028,18 +1071,25 @@ class TradingService:
             return side == "SHORT"
         return side in {"LONG", "SHORT"}
 
-    def _rule_allows_side(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+    def _rule_allows_side(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str,
+    ) -> tuple[bool, str]:
         price = safe_float(row.get("price"))
-        ema20 = safe_float(row.get("ema20"))
-        ema50 = safe_float(row.get("ema50"))
+        ema_fast, ema_slow, ema_fast_span, ema_slow_span = self._ema_values_for_profile(
+            row,
+            profile_name,
+        )
         rsi = safe_float(row.get("rsi"))
         macd = safe_float(row.get("macd"))
         macd_signal = safe_float(row.get("macd_signal"))
         volume_ratio = safe_float(row.get("volume_ratio"))
         strength_confidence = int(safe_float(row.get("strength_confidence")) or 0)
 
-        if price is None or ema50 is None or ema20 is None or rsi is None:
-            return False, "waiting price/EMA20/EMA50/RSI"
+        if price is None or ema_slow is None or ema_fast is None or rsi is None:
+            return False, f"waiting price/EMA{ema_fast_span}/EMA{ema_slow_span}/RSI"
 
         if strength_confidence < self.settings.auto_trade_min_strength_confidence:
             return (
@@ -1064,10 +1114,10 @@ class TradingService:
             )
 
         if side == "LONG":
-            if price <= ema50:
-                return False, "LONG rule: price must be > MA50"
-            if self.settings.auto_trade_entry_confirm_ema_stack and ema20 <= ema50:
-                return False, "LONG rule: EMA20 must be > EMA50"
+            if price <= ema_slow:
+                return False, f"LONG rule: price must be > EMA{ema_slow_span}"
+            if self.settings.auto_trade_entry_confirm_ema_stack and ema_fast <= ema_slow:
+                return False, f"LONG rule: EMA{ema_fast_span} must be > EMA{ema_slow_span}"
             if self.settings.auto_trade_entry_confirm_macd:
                 if (
                     self.settings.auto_trade_entry_require_macd_data
@@ -1090,10 +1140,10 @@ class TradingService:
                 )
             return True, ""
 
-        if price >= ema50:
-            return False, "SHORT rule: price must be < MA50"
-        if self.settings.auto_trade_entry_confirm_ema_stack and ema20 >= ema50:
-            return False, "SHORT rule: EMA20 must be < EMA50"
+        if price >= ema_slow:
+            return False, f"SHORT rule: price must be < EMA{ema_slow_span}"
+        if self.settings.auto_trade_entry_confirm_ema_stack and ema_fast >= ema_slow:
+            return False, f"SHORT rule: EMA{ema_fast_span} must be < EMA{ema_slow_span}"
         if self.settings.auto_trade_entry_confirm_macd:
             if (
                 self.settings.auto_trade_entry_require_macd_data
@@ -1160,19 +1210,23 @@ class TradingService:
 
         return True, ""
 
-    def decide_entry_side(self, row: dict[str, Any]) -> tuple[str | None, str]:
+    def decide_entry_side(
+        self,
+        row: dict[str, Any],
+        profile_name: str,
+    ) -> tuple[str | None, str]:
         reasons: list[str] = []
         candidates: list[str] = []
 
         if self._strategy_allows("LONG"):
-            ok, reason = self._rule_allows_side(row, "LONG")
+            ok, reason = self._rule_allows_side(row, "LONG", profile_name)
             if ok:
                 candidates.append("LONG")
             elif reason:
                 reasons.append(reason)
 
         if self.settings.auto_trade_enable_short and self._strategy_allows("SHORT"):
-            ok, reason = self._rule_allows_side(row, "SHORT")
+            ok, reason = self._rule_allows_side(row, "SHORT", profile_name)
             if ok:
                 candidates.append("SHORT")
             elif reason:
@@ -1965,7 +2019,10 @@ class TradingService:
                     status_reason = f"{symbol}: waiting valid price"
                     continue
 
-                entry_side, reason_text = self.decide_entry_side(row)
+                entry_side, reason_text = self.decide_entry_side(
+                    row,
+                    str(adaptive_profile.get("name") or "MIDDLE"),
+                )
                 if not entry_side:
                     status_reason = f"{symbol}: {reason_text}"
                     continue
@@ -2221,6 +2278,12 @@ class TradingService:
             day_key = self.utc_day_key()
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
             position = self.state.auto_trade_positions.get(selected_symbol)
+            adaptive_profile_name = self._normalize_profile_name(
+                self.state.auto_trade_adaptive_profile,
+            )
+            adaptive_ema_fast_span, adaptive_ema_slow_span = self._ema_spans_for_profile(
+                adaptive_profile_name,
+            )
 
             return {
                 "enabled": self.settings.auto_trade_enabled,
@@ -2296,7 +2359,7 @@ class TradingService:
                 "time_stop_minutes": self.settings.auto_trade_time_stop_minutes,
                 "time_stop_min_pnl_pct": round(self.settings.auto_trade_time_stop_min_pnl_pct, 4),
                 "adaptive_enabled": self.settings.auto_trade_auto_adapt_enabled,
-                "adaptive_profile": self.state.auto_trade_adaptive_profile,
+                "adaptive_profile": adaptive_profile_name,
                 "adaptive_reason": self.state.auto_trade_adaptive_reason,
                 "adaptive_ai_min_confidence": self.state.auto_trade_adaptive_ai_min_confidence,
                 "adaptive_risk_multiplier": round(
@@ -2307,6 +2370,14 @@ class TradingService:
                     self.state.auto_trade_adaptive_cooldown_multiplier,
                     4,
                 ),
+                "adaptive_ema_fast_span": adaptive_ema_fast_span,
+                "adaptive_ema_slow_span": adaptive_ema_slow_span,
+                "profile_weak_ema_fast_span": self.settings.auto_trade_profile_weak_ema_fast,
+                "profile_weak_ema_slow_span": self.settings.auto_trade_profile_weak_ema_slow,
+                "profile_middle_ema_fast_span": self.settings.auto_trade_profile_middle_ema_fast,
+                "profile_middle_ema_slow_span": self.settings.auto_trade_profile_middle_ema_slow,
+                "profile_strong_ema_fast_span": self.settings.auto_trade_profile_strong_ema_fast,
+                "profile_strong_ema_slow_span": self.settings.auto_trade_profile_strong_ema_slow,
                 "auto_convert_to_usdt": self.settings.auto_trade_auto_convert_to_usdt,
                 "auto_convert_min_usdt": round(self.settings.auto_trade_auto_convert_min_usdt, 4),
                 "auto_convert_interval_seconds": (

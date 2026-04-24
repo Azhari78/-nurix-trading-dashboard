@@ -14,7 +14,7 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_indicators(df: pd.DataFrame, extra_ema_spans: tuple[int, ...] = ()) -> pd.DataFrame:
     close = pd.to_numeric(df["close"], errors="coerce")
     high = pd.to_numeric(df["high"], errors="coerce")
     low = pd.to_numeric(df["low"], errors="coerce")
@@ -22,6 +22,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     df["ema20"] = close.ewm(span=20, adjust=False).mean()
     df["ema50"] = close.ewm(span=50, adjust=False).mean()
+    for span in sorted({int(span) for span in extra_ema_spans if int(span) >= 2}):
+        if span in {20, 50}:
+            continue
+        df[f"ema{span}"] = close.ewm(span=span, adjust=False).mean()
 
     delta = close.diff()
     gain = delta.clip(lower=0.0)

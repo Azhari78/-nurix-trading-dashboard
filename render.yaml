@@ -73,6 +73,18 @@ services:
         value: "true"
       - key: AUTO_TRADE_ENTRY_REQUIRE_MACD_DATA
         value: "true"
+      - key: AUTO_TRADE_PROFILE_WEAK_EMA_FAST
+        value: "34"
+      - key: AUTO_TRADE_PROFILE_WEAK_EMA_SLOW
+        value: "89"
+      - key: AUTO_TRADE_PROFILE_MIDDLE_EMA_FAST
+        value: "20"
+      - key: AUTO_TRADE_PROFILE_MIDDLE_EMA_SLOW
+        value: "50"
+      - key: AUTO_TRADE_PROFILE_STRONG_EMA_FAST
+        value: "9"
+      - key: AUTO_TRADE_PROFILE_STRONG_EMA_SLOW
+        value: "21"
       - key: AUTO_TRADE_MIN_VOLUME_RATIO
         value: "1.0"
       - key: AUTO_TRADE_MIN_STRENGTH_CONFIDENCE

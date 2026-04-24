@@ -3324,6 +3324,8 @@ function renderAutoTrade(payload) {
   const adaptiveAiMinConfidence = Number(data.adaptive_ai_min_confidence);
   const adaptiveRiskMultiplier = Number(data.adaptive_risk_multiplier);
   const adaptiveCooldownMultiplier = Number(data.adaptive_cooldown_multiplier);
+  const adaptiveEmaFastSpan = Number(data.adaptive_ema_fast_span);
+  const adaptiveEmaSlowSpan = Number(data.adaptive_ema_slow_span);
   const copyTradeEnabled = Boolean(data.copy_trade_enabled);
   const copyTradeFollowers = Array.isArray(data.copy_trade_followers)
     ? data.copy_trade_followers
@@ -3383,8 +3385,16 @@ function renderAutoTrade(payload) {
     const aiText = aiFilterEnabled
       ? `AI ON (>=${Number.isNaN(aiFilterMinConfidence) ? "-" : aiFilterMinConfidence}% / abs ${Number.isNaN(aiFilterMinScoreAbs) ? "-" : fmtNumber(aiFilterMinScoreAbs, 2)})`
       : "AI OFF";
+    const emaSpanText = (
+      Number.isFinite(adaptiveEmaFastSpan)
+      && Number.isFinite(adaptiveEmaSlowSpan)
+      && adaptiveEmaFastSpan > 0
+      && adaptiveEmaSlowSpan > 0
+    )
+      ? `EMA${Math.trunc(adaptiveEmaFastSpan)}/${Math.trunc(adaptiveEmaSlowSpan)}`
+      : "EMA-";
     const adaptiveText = adaptiveEnabled
-      ? `${adaptiveProfile} (AI>=${Number.isNaN(adaptiveAiMinConfidence) ? "-" : adaptiveAiMinConfidence}%, risk x${Number.isNaN(adaptiveRiskMultiplier) ? "-" : fmtNumber(adaptiveRiskMultiplier, 2)}, cd x${Number.isNaN(adaptiveCooldownMultiplier) ? "-" : fmtNumber(adaptiveCooldownMultiplier, 2)})`
+      ? `${adaptiveProfile} (${emaSpanText} • AI>=${Number.isNaN(adaptiveAiMinConfidence) ? "-" : adaptiveAiMinConfidence}%, risk x${Number.isNaN(adaptiveRiskMultiplier) ? "-" : fmtNumber(adaptiveRiskMultiplier, 2)}, cd x${Number.isNaN(adaptiveCooldownMultiplier) ? "-" : fmtNumber(adaptiveCooldownMultiplier, 2)})`
       : "Adaptive OFF";
     const guardrailText = guardrailActive
       ? `Guardrail ON x${Number.isNaN(riskMultiplier) ? "-" : fmtNumber(riskMultiplier, 2)}`

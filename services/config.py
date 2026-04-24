@@ -173,6 +173,19 @@ def parse_env_int(raw_value: str | None, default: int) -> int:
         return default
 
 
+def parse_ema_pair(
+    fast_raw: str | None,
+    slow_raw: str | None,
+    default_fast: int,
+    default_slow: int,
+) -> tuple[int, int]:
+    fast = max(parse_env_int(fast_raw, default_fast), 2)
+    slow = max(parse_env_int(slow_raw, default_slow), 2)
+    if slow <= fast:
+        slow = fast + 1
+    return fast, slow
+
+
 @dataclass(frozen=True)
 class Settings:
     title: str
@@ -233,6 +246,12 @@ class Settings:
     auto_trade_entry_confirm_ema_stack: bool
     auto_trade_entry_confirm_macd: bool
     auto_trade_entry_require_macd_data: bool
+    auto_trade_profile_weak_ema_fast: int
+    auto_trade_profile_weak_ema_slow: int
+    auto_trade_profile_middle_ema_fast: int
+    auto_trade_profile_middle_ema_slow: int
+    auto_trade_profile_strong_ema_fast: int
+    auto_trade_profile_strong_ema_slow: int
     auto_trade_min_volume_ratio: float
     auto_trade_min_strength_confidence: int
     auto_trade_session_filter_enabled: bool
@@ -470,6 +489,24 @@ def load_settings() -> Settings:
     auto_trade_entry_require_macd_data = parse_env_bool(
         os.getenv("AUTO_TRADE_ENTRY_REQUIRE_MACD_DATA"),
         True,
+    )
+    weak_ema_fast, weak_ema_slow = parse_ema_pair(
+        os.getenv("AUTO_TRADE_PROFILE_WEAK_EMA_FAST"),
+        os.getenv("AUTO_TRADE_PROFILE_WEAK_EMA_SLOW"),
+        34,
+        89,
+    )
+    middle_ema_fast, middle_ema_slow = parse_ema_pair(
+        os.getenv("AUTO_TRADE_PROFILE_MIDDLE_EMA_FAST"),
+        os.getenv("AUTO_TRADE_PROFILE_MIDDLE_EMA_SLOW"),
+        20,
+        50,
+    )
+    strong_ema_fast, strong_ema_slow = parse_ema_pair(
+        os.getenv("AUTO_TRADE_PROFILE_STRONG_EMA_FAST"),
+        os.getenv("AUTO_TRADE_PROFILE_STRONG_EMA_SLOW"),
+        9,
+        21,
     )
     auto_trade_min_volume_ratio = max(
         parse_env_float(os.getenv("AUTO_TRADE_MIN_VOLUME_RATIO"), 0.8),
@@ -742,6 +779,12 @@ def load_settings() -> Settings:
         auto_trade_entry_confirm_ema_stack=auto_trade_entry_confirm_ema_stack,
         auto_trade_entry_confirm_macd=auto_trade_entry_confirm_macd,
         auto_trade_entry_require_macd_data=auto_trade_entry_require_macd_data,
+        auto_trade_profile_weak_ema_fast=weak_ema_fast,
+        auto_trade_profile_weak_ema_slow=weak_ema_slow,
+        auto_trade_profile_middle_ema_fast=middle_ema_fast,
+        auto_trade_profile_middle_ema_slow=middle_ema_slow,
+        auto_trade_profile_strong_ema_fast=strong_ema_fast,
+        auto_trade_profile_strong_ema_slow=strong_ema_slow,
         auto_trade_min_volume_ratio=auto_trade_min_volume_ratio,
         auto_trade_min_strength_confidence=auto_trade_min_strength_confidence,
         auto_trade_session_filter_enabled=auto_trade_session_filter_enabled,
