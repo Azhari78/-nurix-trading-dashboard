@@ -11,6 +11,7 @@ Usage:
   ./switch_profile.sh baseline
   ./switch_profile.sh moderate
   ./switch_profile.sh aggressive
+  ./switch_profile.sh winrate
   ./switch_profile.sh baseline /path/to/.env
 EOF
 }
@@ -33,6 +34,9 @@ moderate)
   ;;
 aggressive)
   PROFILE_FILE="${ROOT_DIR}/.env.aggressive.example"
+  ;;
+winrate)
+  PROFILE_FILE="${ROOT_DIR}/.env.winrate.example"
   ;;
 *)
   echo "Unknown profile: ${PROFILE}" >&2

@@ -18,6 +18,8 @@ services:
         value: BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,TRX/USDT,AVAX/USDT,LINK/USDT,DOT/USDT,POL/USDT,LTC/USDT,BCH/USDT,XLM/USDT,ATOM/USDT,XMR/USDT,ETC/USDT,UNI/USDT,FIL/USDT,HBAR/USDT,NEAR/USDT,ICP/USDT,VET/USDT,CRO/USDT,ALGO/USDT,SUI/USDT,INJ/USDT,APT/USDT,OP/USDT,ARB/USDT,RNDR/USDT,IMX/USDT,STX/USDT,MKR/USDT,AAVE/USDT,THETA/USDT,EOS/USDT,EGLD/USDT,MANA/USDT,SAND/USDT,FTM/USDT,TIA/USDT,PEPE/USDT,SHIB/USDT,BONK/USDT,GRT/USDT,LDO/USDT,FLOW/USDT,SEI/USDT
       - key: DEFAULT_TIMEFRAME
         value: 5m
+      - key: SIGNAL_TIMEFRAME
+        value: 5m
 
       - key: STREAM_SSL_VERIFY
         value: "true"
@@ -38,21 +40,21 @@ services:
       - key: AUTO_TRADE_STATE_SAVE_INTERVAL_SECONDS
         value: "5"
       - key: AUTO_TRADE_SYMBOLS
-        value: BTC/USDT,ETH/USDT,SOL/USDT
+        value: BTC/USDT,ETH/USDT
       - key: AUTO_TRADE_STRATEGY_MODE
-        value: both
+        value: long_only
       - key: AUTO_TRADE_ENABLE_SHORT
-        value: "true"
+        value: "false"
       - key: AUTO_TRADE_MAX_OPEN_POSITIONS
         value: "1"
       - key: AUTO_TRADE_SYMBOL_VALIDATION_ENABLED
         value: "true"
       - key: TRADE_SIZE_USDT
-        value: "15"
+        value: "100"
       - key: TRADE_SIZE_USDT_MIN
-        value: "10"
+        value: "100"
       - key: TRADE_SIZE_USDT_MAX
-        value: "20"
+        value: "100"
       - key: TRADE_SIZE_PERCENT
         value: "0"
       - key: AUTO_TRADE_VOLATILITY_SIZING_ENABLED
@@ -86,9 +88,9 @@ services:
       - key: AUTO_TRADE_PROFILE_STRONG_EMA_SLOW
         value: "21"
       - key: AUTO_TRADE_MIN_VOLUME_RATIO
-        value: "1.0"
+        value: "1.2"
       - key: AUTO_TRADE_MIN_STRENGTH_CONFIDENCE
-        value: "40"
+        value: "50"
       - key: AUTO_TRADE_SESSION_FILTER_ENABLED
         value: "false"
       - key: AUTO_TRADE_SESSION_UTC
@@ -102,13 +104,13 @@ services:
       - key: AUTO_TRADE_EXECUTION_COST_GATE_ENABLED
         value: "true"
       - key: AUTO_TRADE_MAX_SPREAD_PCT
-        value: "0.10"
+        value: "0.06"
       - key: AUTO_TRADE_ESTIMATED_FEE_PCT
         value: "0.08"
       - key: AUTO_TRADE_ESTIMATED_SLIPPAGE_PCT
         value: "0.06"
       - key: AUTO_TRADE_MIN_EDGE_PCT
-        value: "0.25"
+        value: "0.30"
       - key: AUTO_TRADE_SYMBOL_RANK_ENABLED
         value: "true"
       - key: AUTO_TRADE_SYMBOL_RANK_TOP_N
@@ -118,15 +120,15 @@ services:
       - key: TAKE_PROFIT_PCT
         value: "3.5"
       - key: LONG_RSI_MIN
-        value: "47"
+        value: "50"
       - key: LONG_RSI_MAX
-        value: "60"
+        value: "59"
       - key: LONG_STOP_LOSS_PCT
-        value: "2.2"
+        value: "1.8"
       - key: LONG_TAKE_PROFIT_PCT
-        value: "4.0"
+        value: "3.0"
       - key: LONG_TRAILING_PCT
-        value: "1.2"
+        value: "1.0"
       - key: SHORT_RSI_MIN
         value: "62"
       - key: SHORT_RSI_MAX
@@ -138,33 +140,33 @@ services:
       - key: SHORT_TRAILING_PCT
         value: "1.1"
       - key: AUTO_TRADE_TP_AND_RUN_ENABLED
-        value: "false"
+        value: "true"
       - key: AUTO_TRADE_TP_AND_RUN_MIN_PNL_PCT
-        value: "2.0"
+        value: "0.8"
       - key: AUTO_TRADE_PARTIAL_TP_ENABLED
         value: "true"
       - key: AUTO_TRADE_PARTIAL_TP_PCT
-        value: "2.0"
+        value: "1.3"
       - key: AUTO_TRADE_PARTIAL_TP_RATIO
         value: "0.5"
       - key: AUTO_TRADE_BREAK_EVEN_ENABLED
         value: "true"
       - key: AUTO_TRADE_BREAK_EVEN_TRIGGER_PCT
-        value: "0.8"
+        value: "0.7"
       - key: AUTO_TRADE_BREAK_EVEN_BUFFER_PCT
-        value: "0.05"
+        value: "0.08"
       - key: AUTO_TRADE_TIME_STOP_ENABLED
         value: "true"
       - key: AUTO_TRADE_TIME_STOP_MINUTES
-        value: "20"
+        value: "35"
       - key: AUTO_TRADE_TIME_STOP_MIN_PNL_PCT
-        value: "0.00"
+        value: "-0.15"
       - key: COOLDOWN_SECONDS
-        value: "480"
+        value: "420"
       - key: COOLDOWN_MIN_SECONDS
-        value: "360"
+        value: "300"
       - key: COOLDOWN_MAX_SECONDS
-        value: "720"
+        value: "900"
       - key: AUTO_TRADE_COOLDOWN_ADAPTIVE_ENABLED
         value: "true"
       - key: AUTO_TRADE_COOLDOWN_LOSS_STEP_MULT
@@ -186,9 +188,9 @@ services:
       - key: AUTO_TRADE_FORWARD_GUARDRAIL_MIN_TRADES
         value: "14"
       - key: AUTO_TRADE_FORWARD_BASELINE_WIN_RATE
-        value: "0.5"
+        value: "0.52"
       - key: AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USDT
-        value: "0"
+        value: "0.03"
       - key: AUTO_TRADE_FORWARD_GUARDRAIL_RISK_MULT
         value: "0.6"
       - key: AUTO_TRADE_FORWARD_GUARDRAIL_SEVERE_WIN_RATE
@@ -198,9 +200,9 @@ services:
       - key: AI_FILTER_ENABLED
         value: "true"
       - key: AI_FILTER_MIN_CONFIDENCE
-        value: "62"
+        value: "68"
       - key: AI_FILTER_MIN_SCORE_ABS
-        value: "1.2"
+        value: "1.4"
       - key: USE_SANDBOX
         value: "false"
       - key: TELEGRAM_ENABLED

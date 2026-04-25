@@ -161,6 +161,8 @@ let chartSeriesLookup = {
 };
 let chartAutoFitArmed = true;
 let lastChartViewKey = "";
+let fitChartsRaf = null;
+let fitChartsTimer = null;
 
 let allAlerts = [];
 let latestServerAlerts = [];
@@ -276,6 +278,116 @@ function normalizeChartTime(rawTime) {
     }
   }
   return Number.NaN;
+}
+
+function normalizeFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function sanitizeSeriesByTime(series, mapper) {
+  const dedup = new Map();
+  (Array.isArray(series) ? series : []).forEach((point) => {
+    const mapped = mapper(point);
+    if (!mapped) return;
+    dedup.set(mapped.time, mapped);
+  });
+  return Array.from(dedup.values()).sort((a, b) => a.time - b.time);
+}
+
+function sanitizeCandleSeries(series) {
+  return sanitizeSeriesByTime(series, (point) => {
+    const time = normalizeChartTime(point?.time);
+    const open = normalizeFiniteNumber(point?.open);
+    const high = normalizeFiniteNumber(point?.high);
+    const low = normalizeFiniteNumber(point?.low);
+    const close = normalizeFiniteNumber(point?.close);
+    if (
+      !Number.isFinite(time)
+      || !Number.isFinite(open)
+      || !Number.isFinite(high)
+      || !Number.isFinite(low)
+      || !Number.isFinite(close)
+    ) {
+      return null;
+    }
+    const correctedHigh = Math.max(high, open, close, low);
+    const correctedLow = Math.min(low, open, close, high);
+    return {
+      time,
+      open,
+      high: correctedHigh,
+      low: correctedLow,
+      close,
+    };
+  });
+}
+
+function sanitizeLineSeries(series) {
+  return sanitizeSeriesByTime(series, (point) => {
+    const time = normalizeChartTime(point?.time);
+    const value = normalizeFiniteNumber(point?.value);
+    if (!Number.isFinite(time) || !Number.isFinite(value)) return null;
+    return { time, value };
+  });
+}
+
+function sanitizeHistogramSeries(series) {
+  return sanitizeSeriesByTime(series, (point) => {
+    const time = normalizeChartTime(point?.time);
+    const value = normalizeFiniteNumber(point?.value);
+    if (!Number.isFinite(time) || !Number.isFinite(value)) return null;
+    const color = typeof point?.color === "string" ? point.color : undefined;
+    return color ? { time, value, color } : { time, value };
+  });
+}
+
+function sanitizeChartPayload(chart) {
+  if (!chart || typeof chart !== "object") return null;
+  return {
+    ...chart,
+    candles: sanitizeCandleSeries(chart.candles),
+    ema20: sanitizeLineSeries(chart.ema20),
+    ema50: sanitizeLineSeries(chart.ema50),
+    vwap_session: sanitizeLineSeries(chart.vwap_session),
+    vwap_upper_1: sanitizeLineSeries(chart.vwap_upper_1),
+    vwap_lower_1: sanitizeLineSeries(chart.vwap_lower_1),
+    vwap_upper_2: sanitizeLineSeries(chart.vwap_upper_2),
+    vwap_lower_2: sanitizeLineSeries(chart.vwap_lower_2),
+    volume: sanitizeHistogramSeries(chart.volume),
+    rsi: sanitizeLineSeries(chart.rsi),
+    macd: sanitizeLineSeries(chart.macd),
+    macd_signal: sanitizeLineSeries(chart.macd_signal),
+    macd_histogram: sanitizeHistogramSeries(chart.macd_histogram),
+  };
+}
+
+function applyChartData(chart) {
+  if (!chart) return false;
+  try {
+    candleSeries.setData(chart.candles || []);
+    ema20Series.setData(chart.ema20 || []);
+    ema50Series.setData(chart.ema50 || []);
+    vwapSessionSeries.setData(chart.vwap_session || []);
+    vwapUpper1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_1 || []) : []);
+    vwapLower1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_1 || []) : []);
+    vwapUpper2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_2 || []) : []);
+    vwapLower2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_2 || []) : []);
+    volumeSeries.setData(chart.volume || []);
+
+    const rsiData = chart.rsi || [];
+    rsiSeries.setData(rsiData);
+    rsiUpperSeries.setData(rsiData.map((point) => ({ time: point.time, value: 70 })));
+    rsiLowerSeries.setData(rsiData.map((point) => ({ time: point.time, value: 30 })));
+
+    macdSeries.setData(chart.macd || []);
+    macdSignalSeries.setData(chart.macd_signal || []);
+    macdHistogramSeries.setData(chart.macd_histogram || []);
+    return true;
+  } catch (error) {
+    console.warn("Chart data render failed:", error);
+    return false;
+  }
 }
 
 function nearestTime(times, target, maxDeltaSeconds) {
@@ -483,6 +595,8 @@ function applyDashboardViewMode(mode) {
     const visible = normalized === "all" || group === normalized;
     section.classList.toggle("view-group-hidden", !visible);
   });
+
+  scheduleFitCharts(60);
 }
 
 function initDashboardViewMode() {
@@ -1118,27 +1232,16 @@ function renderReplaySlice() {
     macd_histogram: sliceSeriesToTime(source.macd_histogram, cutoff),
   };
 
-  latestChartPayload = replayChart;
-  latestChartTimeframe = String(replayChart.timeframe || selectedTimeframe || "1m");
-  candleSeries.setData(replayChart.candles || []);
-  ema20Series.setData(replayChart.ema20 || []);
-  ema50Series.setData(replayChart.ema50 || []);
-  vwapSessionSeries.setData(replayChart.vwap_session || []);
-  vwapUpper1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_upper_1 || []) : []);
-  vwapLower1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_lower_1 || []) : []);
-  vwapUpper2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_upper_2 || []) : []);
-  vwapLower2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (replayChart.vwap_lower_2 || []) : []);
-  volumeSeries.setData(replayChart.volume || []);
-  rsiSeries.setData(replayChart.rsi || []);
-  rsiUpperSeries.setData((replayChart.rsi || []).map((point) => ({ time: point.time, value: 70 })));
-  rsiLowerSeries.setData((replayChart.rsi || []).map((point) => ({ time: point.time, value: 30 })));
-  macdSeries.setData(replayChart.macd || []);
-  macdSignalSeries.setData(replayChart.macd_signal || []);
-  macdHistogramSeries.setData(replayChart.macd_histogram || []);
-  rebuildChartSeriesLookup(replayChart);
+  const sanitizedReplayChart = sanitizeChartPayload(replayChart);
+  if (!sanitizedReplayChart) return;
+
+  latestChartPayload = sanitizedReplayChart;
+  latestChartTimeframe = String(sanitizedReplayChart.timeframe || selectedTimeframe || "1m");
+  if (!applyChartData(sanitizedReplayChart)) return;
+  rebuildChartSeriesLookup(sanitizedReplayChart);
   refreshChartDecorations();
   updateChartOverlay();
-  renderMtfRibbon(replayChart.mtf_bias);
+  renderMtfRibbon(sanitizedReplayChart.mtf_bias);
   resetReplayUi();
 }
 
@@ -1855,14 +1958,19 @@ function armChartAutoFit() {
 
 function applySmartChartFit(chart) {
   if (!priceChart || !rsiChart || !macdChart) return;
+  if (!Array.isArray(chart?.candles) || chart.candles.length === 0) return;
   const symbol = String(chart?.symbol || selectedSymbol || "");
   const timeframe = String(chart?.timeframe || selectedTimeframe || "1m");
   const viewKey = `${symbol}:${timeframe}`;
   if (!chartAutoFitArmed && viewKey === lastChartViewKey) return;
 
-  priceChart.timeScale().fitContent();
-  rsiChart.timeScale().fitContent();
-  macdChart.timeScale().fitContent();
+  try {
+    priceChart.timeScale().fitContent();
+    rsiChart.timeScale().fitContent();
+    macdChart.timeScale().fitContent();
+  } catch {
+    return;
+  }
   lastChartViewKey = viewKey;
   chartAutoFitArmed = false;
 }
@@ -2401,15 +2509,27 @@ function setupCrosshairSync() {
       Math.max(60, tfSeconds * 2),
     );
     if (!Number.isFinite(value)) {
-      targetChart.clearCrosshairPosition();
+      try {
+        targetChart.clearCrosshairPosition();
+      } catch {
+        // ignore transient chart state errors
+      }
       return;
     }
-    targetChart.setCrosshairPosition(value, sourceTime, targetSeries);
+    try {
+      targetChart.setCrosshairPosition(value, sourceTime, targetSeries);
+    } catch {
+      // ignore transient chart state errors
+    }
   };
 
   const clearTargets = (targets) => {
     targets.forEach((target) => {
-      target.clearCrosshairPosition();
+      try {
+        target.clearCrosshairPosition();
+      } catch {
+        // ignore transient chart state errors
+      }
     });
   };
 
@@ -2446,12 +2566,52 @@ function setupCrosshairSync() {
   ]);
 }
 
+function getVisibleChartSize(container, minHeight) {
+  if (!container) return null;
+  const rect = container.getBoundingClientRect();
+  const width = Math.floor(Math.max(rect.width || 0, container.clientWidth || 0));
+  const height = Math.floor(Math.max(rect.height || 0, container.clientHeight || 0));
+  if (width < 24 || height < 24) return null;
+  return {
+    width,
+    height: Math.max(height, minHeight),
+  };
+}
+
 function fitCharts() {
   if (!priceChart || !rsiChart || !macdChart) return;
 
-  priceChart.applyOptions({ width: Math.max(priceChartContainer.clientWidth, 320) });
-  rsiChart.applyOptions({ width: Math.max(rsiChartContainer.clientWidth, 320) });
-  macdChart.applyOptions({ width: Math.max(macdChartContainer.clientWidth, 320) });
+  const priceSize = getVisibleChartSize(priceChartContainer, 220);
+  const rsiSize = getVisibleChartSize(rsiChartContainer, 100);
+  const macdSize = getVisibleChartSize(macdChartContainer, 100);
+
+  if (priceSize) priceChart.applyOptions(priceSize);
+  if (rsiSize) rsiChart.applyOptions(rsiSize);
+  if (macdSize) macdChart.applyOptions(macdSize);
+}
+
+function scheduleFitCharts(delayMs = 0) {
+  if (fitChartsTimer) {
+    clearTimeout(fitChartsTimer);
+    fitChartsTimer = null;
+  }
+
+  const run = () => {
+    if (fitChartsRaf) {
+      cancelAnimationFrame(fitChartsRaf);
+      fitChartsRaf = null;
+    }
+    fitChartsRaf = requestAnimationFrame(() => {
+      fitChartsRaf = null;
+      fitCharts();
+    });
+  };
+
+  if (delayMs > 0) {
+    fitChartsTimer = setTimeout(run, delayMs);
+  } else {
+    run();
+  }
 }
 
 function initCharts() {
@@ -2559,41 +2719,36 @@ function initCharts() {
   });
 
   setupCrosshairSync();
-  fitCharts();
-  window.addEventListener("resize", fitCharts);
+  scheduleFitCharts();
+  window.addEventListener("resize", () => scheduleFitCharts(), { passive: true });
+  window.addEventListener("orientationchange", () => scheduleFitCharts(120), { passive: true });
+  window.addEventListener("pageshow", () => scheduleFitCharts(80));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      scheduleFitCharts(80);
+    }
+  });
+  if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
+    window.visualViewport.addEventListener("resize", () => scheduleFitCharts(), { passive: true });
+  }
 }
 
 function renderChart(chart) {
   if (!chart) return;
-  latestLiveChartPayload = chart;
+  const sanitizedChart = sanitizeChartPayload(chart);
+  if (!sanitizedChart) return;
+  latestLiveChartPayload = sanitizedChart;
   if (replayState.active) return;
-  latestChartPayload = chart;
-  latestChartTimeframe = String(chart.timeframe || selectedTimeframe || "1m");
+  latestChartPayload = sanitizedChart;
+  latestChartTimeframe = String(sanitizedChart.timeframe || selectedTimeframe || "1m");
 
-  candleSeries.setData(chart.candles || []);
-  ema20Series.setData(chart.ema20 || []);
-  ema50Series.setData(chart.ema50 || []);
-  vwapSessionSeries.setData(chart.vwap_session || []);
-  vwapUpper1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_1 || []) : []);
-  vwapLower1Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_1 || []) : []);
-  vwapUpper2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_upper_2 || []) : []);
-  vwapLower2Series.setData(CHART_CLEAN_MODE.showVwapBands ? (chart.vwap_lower_2 || []) : []);
-  volumeSeries.setData(chart.volume || []);
-
-  const rsiData = chart.rsi || [];
-  rsiSeries.setData(rsiData);
-  rsiUpperSeries.setData(rsiData.map((point) => ({ time: point.time, value: 70 })));
-  rsiLowerSeries.setData(rsiData.map((point) => ({ time: point.time, value: 30 })));
-
-  macdSeries.setData(chart.macd || []);
-  macdSignalSeries.setData(chart.macd_signal || []);
-  macdHistogramSeries.setData(chart.macd_histogram || []);
-  rebuildChartSeriesLookup(chart);
+  if (!applyChartData(sanitizedChart)) return;
+  rebuildChartSeriesLookup(sanitizedChart);
   refreshChartDecorations();
   updateChartOverlay();
-  renderMtfRibbon(chart.mtf_bias);
+  renderMtfRibbon(sanitizedChart.mtf_bias);
 
-  applySmartChartFit(chart);
+  applySmartChartFit(sanitizedChart);
 }
 
 function setExecutionOutput(node, value) {

@@ -328,6 +328,7 @@ def load_settings() -> Settings:
     symbols = parse_env_symbols(os.getenv("SYMBOLS"))
     default_symbol = symbols[0]
     default_timeframe = parse_default_timeframe(os.getenv("DEFAULT_TIMEFRAME"))
+    signal_timeframe = parse_default_timeframe(os.getenv("SIGNAL_TIMEFRAME"))
 
     auto_trade_enabled = parse_env_bool(os.getenv("AUTO_TRADE_ENABLED"), False)
     paper_trading = parse_env_bool(os.getenv("PAPER_TRADING"), True)
@@ -711,7 +712,7 @@ def load_settings() -> Settings:
 
     return Settings(
         title="Nurix Trading Dashboard",
-        signal_timeframe="1m",
+        signal_timeframe=signal_timeframe,
         signal_candle_limit=120,
         chart_candle_limit=220,
         push_interval_seconds=2.0,
