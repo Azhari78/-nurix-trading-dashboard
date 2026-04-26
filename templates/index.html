@@ -450,6 +450,85 @@
       gap: 10px;
     }
 
+    .chart-headline {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px 12px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(96, 165, 250, 0.17) 0%, transparent 45%),
+        #091428;
+    }
+
+    .chart-head-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .chart-head-symbol {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      line-height: 1;
+    }
+
+    .chart-head-tf {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 40px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #d7e4ff;
+      background: rgba(96, 165, 250, 0.2);
+      border: 1px solid rgba(96, 165, 250, 0.45);
+      text-transform: uppercase;
+    }
+
+    .chart-head-stats {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px 8px;
+    }
+
+    .chart-head-pill {
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 999px;
+      background: rgba(8, 17, 39, 0.9);
+      padding: 3px 8px;
+      font-size: 11px;
+      line-height: 1.2;
+      color: var(--muted);
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chart-head-pill .v {
+      color: var(--text);
+      font-weight: 700;
+      margin-left: 4px;
+    }
+
+    .chart-head-pill.pos .v {
+      color: var(--green);
+    }
+
+    .chart-head-pill.neg .v {
+      color: var(--red);
+    }
+
     .price-chart-wrap {
       position: relative;
       border: 1px solid var(--border);
@@ -465,7 +544,7 @@
     .chart-overlay {
       position: absolute;
       left: 8px;
-      top: 8px;
+      top: 42px;
       z-index: 4;
       display: flex;
       flex-wrap: wrap;
@@ -554,7 +633,7 @@
     .chart-mtf-ribbon {
       position: absolute;
       right: 8px;
-      top: 8px;
+      top: 42px;
       z-index: 4;
       display: flex;
       flex-wrap: wrap;
@@ -1085,7 +1164,24 @@
       }
 
       .chart-mtf-ribbon {
+        top: 72px;
+      }
+
+      .chart-overlay {
         top: 38px;
+      }
+
+      .chart-headline {
+        gap: 8px;
+      }
+
+      .chart-head-main {
+        width: 100%;
+      }
+
+      .chart-head-stats {
+        width: 100%;
+        justify-content: flex-start;
       }
     }
   </style>
@@ -1172,6 +1268,18 @@
 
     <section class="main-grid" data-view-group="overview">
       <section class="panel chart-stack">
+        <div class="chart-headline">
+          <div class="chart-head-main">
+            <span class="chart-head-symbol" id="chart-head-symbol">-</span>
+            <span class="chart-head-tf" id="chart-head-timeframe">-</span>
+          </div>
+          <div class="chart-head-stats">
+            <span class="chart-head-pill" id="chart-head-last-pill">Last <span class="v" id="chart-head-last">-</span></span>
+            <span class="chart-head-pill" id="chart-head-change-pill">24h <span class="v" id="chart-head-change">-</span></span>
+            <span class="chart-head-pill">Candle <span class="v" id="chart-head-ohlc">-</span></span>
+            <span class="chart-head-pill">EMA20/50 <span class="v" id="chart-head-ema">-</span></span>
+          </div>
+        </div>
         <div class="price-chart-wrap">
           <div id="price-chart"></div>
           <div class="chart-overlay">

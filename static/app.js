@@ -36,6 +36,14 @@ const chartOverlayEdgeNode = document.getElementById("chart-ov-edge");
 const chartOverlayRankNode = document.getElementById("chart-ov-rank");
 const chartOverlaySrNode = document.getElementById("chart-ov-sr");
 const chartOverlayTrendNode = document.getElementById("chart-ov-trend");
+const chartHeadSymbolNode = document.getElementById("chart-head-symbol");
+const chartHeadTimeframeNode = document.getElementById("chart-head-timeframe");
+const chartHeadLastNode = document.getElementById("chart-head-last");
+const chartHeadLastPillNode = document.getElementById("chart-head-last-pill");
+const chartHeadChangeNode = document.getElementById("chart-head-change");
+const chartHeadChangePillNode = document.getElementById("chart-head-change-pill");
+const chartHeadOhlcNode = document.getElementById("chart-head-ohlc");
+const chartHeadEmaNode = document.getElementById("chart-head-ema");
 const chartMtf1mNode = document.getElementById("chart-mtf-1m");
 const chartMtf5mNode = document.getElementById("chart-mtf-5m");
 const chartMtf15mNode = document.getElementById("chart-mtf-15m");
@@ -228,7 +236,7 @@ let macdHistogramSeries;
 
 let latestStructure = null;
 const CHART_CLEAN_MODE = {
-  hideMouseCrosshair: true,
+  hideMouseCrosshair: false,
   showVwapBands: false,
   showOnlyPrimarySr: true,
   showTp1Guide: false,
@@ -1982,30 +1990,60 @@ function baseChartOptions(height) {
     height,
     layout: {
       background: { type: "solid", color: "#081127" },
-      textColor: "#9bb1d9",
+      textColor: "#b8c7e6",
+      fontFamily: "Trebuchet MS, Segoe UI, sans-serif",
+      fontSize: 11,
     },
     grid: {
-      vertLines: { color: "#1d2a44" },
-      horzLines: { color: "#1d2a44" },
+      vertLines: { color: "rgba(58, 81, 125, 0.42)" },
+      horzLines: { color: "rgba(58, 81, 125, 0.42)" },
     },
     rightPriceScale: {
       borderColor: "#2b3d60",
+      borderVisible: true,
+      entireTextOnly: false,
+      autoScale: true,
+      scaleMargins: {
+        top: 0.08,
+        bottom: 0.12,
+      },
     },
     timeScale: {
       borderColor: "#2b3d60",
+      borderVisible: true,
       timeVisible: true,
       secondsVisible: false,
+      rightOffset: 6,
+      barSpacing: 7,
+      minBarSpacing: 1.2,
+      fixLeftEdge: false,
+      lockVisibleTimeRangeOnResize: true,
     },
     crosshair: {
       mode: 0,
       vertLine: {
         visible: !CHART_CLEAN_MODE.hideMouseCrosshair,
-        labelVisible: false,
+        labelVisible: true,
+        width: 1,
+        color: "rgba(130, 152, 195, 0.52)",
       },
       horzLine: {
         visible: !CHART_CLEAN_MODE.hideMouseCrosshair,
-        labelVisible: false,
+        labelVisible: true,
+        width: 1,
+        color: "rgba(130, 152, 195, 0.52)",
       },
+    },
+    handleScale: {
+      axisPressedMouseMove: true,
+      mouseWheel: true,
+      pinch: true,
+    },
+    handleScroll: {
+      pressedMouseMove: true,
+      mouseWheel: true,
+      horzTouchDrag: true,
+      vertTouchDrag: true,
     },
   };
 }
@@ -2632,10 +2670,24 @@ function initCharts() {
     borderDownColor: "#ff5b5b",
     wickUpColor: "#16c784",
     wickDownColor: "#ff5b5b",
+    priceLineVisible: true,
+    lastValueVisible: true,
   });
 
-  ema20Series = priceChart.addLineSeries({ color: "#f5a524", lineWidth: 2 });
-  ema50Series = priceChart.addLineSeries({ color: "#60a5fa", lineWidth: 2 });
+  ema20Series = priceChart.addLineSeries({
+    color: "#f5a524",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerRadius: 2,
+  });
+  ema50Series = priceChart.addLineSeries({
+    color: "#60a5fa",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerRadius: 2,
+  });
   vwapSessionSeries = priceChart.addLineSeries({
     color: "#f8fafc",
     lineWidth: 2,
@@ -2697,23 +2749,42 @@ function initCharts() {
     priceScaleId: "volume",
   });
   priceChart.priceScale("volume").applyOptions({
-    scaleMargins: { top: 0.8, bottom: 0.0 },
+    scaleMargins: { top: 0.74, bottom: 0.0 },
   });
 
   rsiChart = window.LightweightCharts.createChart(
     rsiChartContainer,
     baseChartOptions(150),
   );
-  rsiSeries = rsiChart.addLineSeries({ color: "#c084fc", lineWidth: 2 });
-  rsiUpperSeries = rsiChart.addLineSeries({ color: "#64748b", lineWidth: 1 });
-  rsiLowerSeries = rsiChart.addLineSeries({ color: "#64748b", lineWidth: 1 });
+  rsiChart.applyOptions({
+    timeScale: {
+      visible: false,
+    },
+    rightPriceScale: {
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.1,
+      },
+    },
+  });
+  rsiSeries = rsiChart.addLineSeries({ color: "#c084fc", lineWidth: 2, crosshairMarkerRadius: 2 });
+  rsiUpperSeries = rsiChart.addLineSeries({ color: "#64748b", lineWidth: 1, lineStyle: 2 });
+  rsiLowerSeries = rsiChart.addLineSeries({ color: "#64748b", lineWidth: 1, lineStyle: 2 });
 
   macdChart = window.LightweightCharts.createChart(
     macdChartContainer,
     baseChartOptions(150),
   );
-  macdSeries = macdChart.addLineSeries({ color: "#22c55e", lineWidth: 2 });
-  macdSignalSeries = macdChart.addLineSeries({ color: "#fb923c", lineWidth: 2 });
+  macdChart.applyOptions({
+    rightPriceScale: {
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.1,
+      },
+    },
+  });
+  macdSeries = macdChart.addLineSeries({ color: "#22c55e", lineWidth: 2, crosshairMarkerRadius: 2 });
+  macdSignalSeries = macdChart.addLineSeries({ color: "#fb923c", lineWidth: 2, crosshairMarkerRadius: 2 });
   macdHistogramSeries = macdChart.addHistogramSeries({
     base: 0,
     priceFormat: { type: "price", precision: 6, minMove: 0.000001 },
@@ -2734,6 +2805,71 @@ function initCharts() {
   }
 }
 
+function updateChartHeader(chart) {
+  const symbol = String(chart?.symbol || currentSummary?.symbol || selectedSymbol || "-");
+  const timeframe = String(chart?.timeframe || selectedTimeframe || "-").toUpperCase();
+  const candles = Array.isArray(chart?.candles) ? chart.candles : [];
+  const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
+
+  const open = Number(lastCandle?.open);
+  const high = Number(lastCandle?.high);
+  const low = Number(lastCandle?.low);
+  const closeFromCandle = Number(lastCandle?.close);
+  const closeFromSummary = Number(currentSummary?.price);
+  const lastPrice = Number.isFinite(closeFromCandle) ? closeFromCandle : closeFromSummary;
+
+  const change24h = Number(currentSummary?.change_24h);
+  const ema20 = Number(currentSummary?.ema20);
+  const ema50 = Number(currentSummary?.ema50);
+
+  if (chartHeadSymbolNode) chartHeadSymbolNode.textContent = symbol;
+  if (chartHeadTimeframeNode) chartHeadTimeframeNode.textContent = timeframe;
+  if (chartHeadLastNode) chartHeadLastNode.textContent = Number.isFinite(lastPrice) ? fmtPrice(lastPrice) : "-";
+  if (chartHeadChangeNode) chartHeadChangeNode.textContent = Number.isFinite(change24h) ? fmtPercent(change24h) : "-";
+  if (chartHeadEmaNode) {
+    chartHeadEmaNode.textContent = Number.isFinite(ema20) && Number.isFinite(ema50)
+      ? `${fmtPrice(ema20)} / ${fmtPrice(ema50)}`
+      : "-";
+  }
+  if (chartHeadOhlcNode) {
+    chartHeadOhlcNode.textContent = (
+      Number.isFinite(open)
+      && Number.isFinite(high)
+      && Number.isFinite(low)
+      && Number.isFinite(closeFromCandle)
+    )
+      ? `O ${fmtPrice(open)} H ${fmtPrice(high)} L ${fmtPrice(low)} C ${fmtPrice(closeFromCandle)}`
+      : "-";
+  }
+
+  if (chartHeadLastPillNode) {
+    chartHeadLastPillNode.classList.remove("pos", "neg");
+    if (Number.isFinite(open) && Number.isFinite(closeFromCandle)) {
+      if (closeFromCandle > open) chartHeadLastPillNode.classList.add("pos");
+      if (closeFromCandle < open) chartHeadLastPillNode.classList.add("neg");
+    }
+  }
+  if (chartHeadChangePillNode) {
+    chartHeadChangePillNode.classList.remove("pos", "neg");
+    if (Number.isFinite(change24h)) {
+      if (change24h > 0) chartHeadChangePillNode.classList.add("pos");
+      if (change24h < 0) chartHeadChangePillNode.classList.add("neg");
+    }
+  }
+
+  const watermarkText = symbol === "-" ? "" : `${symbol} • ${timeframe}`;
+  priceChart?.applyOptions({
+    watermark: {
+      visible: Boolean(watermarkText),
+      text: watermarkText,
+      fontSize: 19,
+      color: "rgba(184, 199, 230, 0.08)",
+      horzAlign: "left",
+      vertAlign: "top",
+    },
+  });
+}
+
 function renderChart(chart) {
   if (!chart) return;
   const sanitizedChart = sanitizeChartPayload(chart);
@@ -2745,6 +2881,7 @@ function renderChart(chart) {
 
   if (!applyChartData(sanitizedChart)) return;
   rebuildChartSeriesLookup(sanitizedChart);
+  updateChartHeader(sanitizedChart);
   refreshChartDecorations();
   updateChartOverlay();
   renderMtfRibbon(sanitizedChart.mtf_bias);
