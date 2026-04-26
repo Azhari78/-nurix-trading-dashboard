@@ -120,6 +120,7 @@ const autoTradeNoteNode = document.getElementById("auto-trade-note");
 const autoTradeAdaptiveNode = document.getElementById("auto-trade-adaptive");
 const autoTradeCopyNode = document.getElementById("auto-trade-copy");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
+const autoTradeDailyPnlHistoryNode = document.getElementById("auto-trade-daily-pnl-history");
 const copyTradeEventsNode = document.getElementById("copy-trade-events");
 const tradeJournalBody = document.getElementById("trade-journal-body");
 const exportJournalCsvBtn = document.getElementById("export-journal-csv");
@@ -3445,6 +3446,9 @@ function renderAutoTrade(payload) {
   const openPositions = Number(data.open_positions || 0);
   const maxOpenPositions = Number(data.max_open_positions);
   const dailyPnl = Number(data.daily_pnl_usdt);
+  const dailyPnl30d = Number(data.daily_pnl_30d_usdt);
+  const dailyPnlHistoryDays = Number(data.daily_pnl_history_days || 30);
+  const dailyPnlHistory = Array.isArray(data.daily_pnl_history) ? data.daily_pnl_history : [];
   const lossLimit = Number(data.daily_loss_limit_usdt);
   const tradeSizeUsdt = Number(data.trade_size_usdt);
   const tradeSizeUsdtMin = Number(data.trade_size_usdt_min);
@@ -3519,10 +3523,46 @@ function renderAutoTrade(payload) {
 
   if (autoTradePnlNode) {
     const hasPnl = !Number.isNaN(dailyPnl);
-    autoTradePnlNode.textContent = hasPnl ? `${dailyPnl.toFixed(2)} USDT` : "-";
+    const hasPnl30d = !Number.isNaN(dailyPnl30d);
+    const historyLabel = (
+      Number.isFinite(dailyPnlHistoryDays) && dailyPnlHistoryDays > 0
+        ? `${Math.trunc(dailyPnlHistoryDays)}D`
+        : "30D"
+    );
+    const todayText = hasPnl ? `Today ${fmtPnlUsdt(dailyPnl)}` : "Today -";
+    const lookbackText = hasPnl30d ? `${historyLabel} ${fmtPnlUsdt(dailyPnl30d)}` : `${historyLabel} -`;
+    autoTradePnlNode.textContent = `${todayText} • ${lookbackText}`;
     autoTradePnlNode.classList.remove("pos", "neg");
     if (hasPnl && dailyPnl > 0) autoTradePnlNode.classList.add("pos");
     if (hasPnl && dailyPnl < 0) autoTradePnlNode.classList.add("neg");
+  }
+
+  if (autoTradeDailyPnlHistoryNode) {
+    if (dailyPnlHistory.length === 0) {
+      autoTradeDailyPnlHistoryNode.innerHTML =
+        `<tr><td colspan="2" class="mini-empty">No daily PnL history yet.</td></tr>`;
+    } else {
+      autoTradeDailyPnlHistoryNode.innerHTML = dailyPnlHistory
+        .map((entry) => {
+          const dayKey = escapeHtml(String(entry?.day_key || "-"));
+          const pnlValue = Number(entry?.pnl_usdt);
+          const pnlClass = Number.isNaN(pnlValue)
+            ? ""
+            : pnlValue > 0
+              ? "pos"
+              : pnlValue < 0
+                ? "neg"
+                : "";
+          const pnlText = fmtPnlUsdt(pnlValue);
+          return `
+            <tr>
+              <td>${dayKey}</td>
+              <td class="${pnlClass}">${pnlText}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
   }
 
   if (autoTradeRiskNode) {

@@ -5,6 +5,7 @@ import logging
 import random
 import time
 from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ class TradingService:
             int(settings.auto_trade_state_save_interval_seconds),
         )
         self._last_state_save_at = 0.0
+        self._daily_pnl_history_days = 30
         self._load_persisted_runtime_state()
 
     def _state_persistence_enabled(self) -> bool:
@@ -70,6 +72,67 @@ class TradingService:
             value = safe_float(value_raw)
             values[key] = float(value) if value is not None else 0.0
         return values
+
+    @staticmethod
+    def _parse_utc_day_key(day_key: str) -> datetime | None:
+        value = str(day_key or "").strip()
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return None
+
+    def _prune_daily_pnl_history_locked(self, current_day_key: str | None = None) -> None:
+        keep_days = max(1, int(self._daily_pnl_history_days))
+        current_key = str(current_day_key or self.utc_day_key()).strip()
+        current_day = self._parse_utc_day_key(current_key)
+        if current_day is None:
+            current_day = self._parse_utc_day_key(self.utc_day_key())
+        if current_day is None:
+            return
+        cutoff = current_day - timedelta(days=keep_days - 1)
+
+        daily_pnl_trimmed: dict[str, float] = {}
+        for key_raw, value_raw in self.state.auto_trade_daily_pnl.items():
+            day_key = str(key_raw or "").strip()
+            day_dt = self._parse_utc_day_key(day_key)
+            if day_dt is None or day_dt < cutoff:
+                continue
+            value = safe_float(value_raw)
+            daily_pnl_trimmed[day_key] = float(value) if value is not None else 0.0
+        self.state.auto_trade_daily_pnl = daily_pnl_trimmed
+
+        halt_reason_trimmed: dict[str, str] = {}
+        for key_raw, reason_raw in self.state.auto_trade_halt_reason_by_day.items():
+            day_key = str(key_raw or "").strip()
+            day_dt = self._parse_utc_day_key(day_key)
+            if day_dt is None or day_dt < cutoff:
+                continue
+            reason = str(reason_raw or "").strip()
+            if reason:
+                halt_reason_trimmed[day_key] = reason
+        self.state.auto_trade_halt_reason_by_day = halt_reason_trimmed
+
+    def _daily_pnl_history_locked(self, limit_days: int | None = None) -> list[dict[str, Any]]:
+        rows: list[tuple[datetime, str, float]] = []
+        for key_raw, value_raw in self.state.auto_trade_daily_pnl.items():
+            day_key = str(key_raw or "").strip()
+            day_dt = self._parse_utc_day_key(day_key)
+            if day_dt is None:
+                continue
+            value = safe_float(value_raw)
+            rows.append((day_dt, day_key, float(value) if value is not None else 0.0))
+        rows.sort(key=lambda item: item[0], reverse=True)
+        if limit_days is not None and limit_days > 0:
+            rows = rows[:limit_days]
+        return [
+            {
+                "day_key": day_key,
+                "pnl_usdt": round(value, 4),
+            }
+            for _, day_key, value in rows
+        ]
 
     def _load_persisted_runtime_state(self) -> None:
         if not self._state_persistence_enabled():
@@ -118,6 +181,7 @@ class TradingService:
                 for key, value in (payload.get("auto_trade_halt_reason_by_day") or {}).items()
                 if str(key).strip()
             }
+            self._prune_daily_pnl_history_locked(self.utc_day_key())
             self.state.auto_trade_halt_day = (
                 str(payload.get("auto_trade_halt_day")).strip()
                 if payload.get("auto_trade_halt_day") is not None
@@ -184,6 +248,7 @@ class TradingService:
 
     def _build_runtime_state_payload(self) -> dict[str, Any]:
         with self.state.auto_trade_lock:
+            self._prune_daily_pnl_history_locked(self.utc_day_key())
             payload: dict[str, Any] = {
                 "version": 1,
                 "saved_at": int(time.time()),
@@ -1686,6 +1751,7 @@ class TradingService:
             available_usdt = safe_float((wallet_payload or {}).get("usdt_free"))
             status_reason = "Waiting for valid trade setup"
             day_key = self.utc_day_key()
+            self._prune_daily_pnl_history_locked(day_key)
             if day_key not in self.state.auto_trade_daily_pnl:
                 self.state.auto_trade_daily_pnl[day_key] = 0.0
             if self.state.auto_trade_halt_day and self.state.auto_trade_halt_day != day_key:
@@ -2338,7 +2404,13 @@ class TradingService:
         with self.state.auto_trade_lock:
             now = time.time()
             day_key = self.utc_day_key()
+            self._prune_daily_pnl_history_locked(day_key)
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
+            daily_pnl_history = self._daily_pnl_history_locked(limit_days=self._daily_pnl_history_days)
+            daily_pnl_30d = sum(
+                safe_float(row.get("pnl_usdt")) or 0.0
+                for row in daily_pnl_history
+            )
             position = self.state.auto_trade_positions.get(selected_symbol)
             adaptive_profile_name = self._normalize_profile_name(
                 self.state.auto_trade_adaptive_profile,
@@ -2463,6 +2535,8 @@ class TradingService:
                 "cooldown_min_seconds": self.settings.cooldown_min_seconds,
                 "cooldown_max_seconds": self.settings.cooldown_max_seconds,
                 "daily_pnl_usdt": round(daily_pnl, 4),
+                "daily_pnl_30d_usdt": round(daily_pnl_30d, 4),
+                "daily_pnl_history_days": self._daily_pnl_history_days,
                 "daily_loss_limit_usdt": round(self.settings.max_daily_loss_usdt, 4),
                 "halted": (
                     self.state.auto_trade_halt_day == day_key
@@ -2474,6 +2548,7 @@ class TradingService:
                 "open_positions": len(self.state.auto_trade_positions),
                 "selected_position": position,
                 "recent_events": list(self.state.auto_trade_events)[-12:],
+                "daily_pnl_history": daily_pnl_history,
                 "recent_journal": list(self.state.auto_trade_journal)[-120:],
                 "journal_count": len(self.state.auto_trade_journal),
                 "daily_recap_last_day": self.state.auto_trade_last_daily_recap_day,
