@@ -2938,6 +2938,9 @@ function updateExecutionPanel() {
   const auto = latestAutoTrade || {};
   const autoEnabled = Boolean(auto.enabled);
   const halted = Boolean(auto.halted);
+  const haltType = String(auto.halt_type || "");
+  const haltReason = String(auto.halt_reason || "");
+  const haltRemainingSeconds = Number(auto.halt_remaining_seconds || 0);
   const strategyMode = String(auto.strategy_mode || "long_only");
   const shortEnabled = Boolean(auto.short_enabled);
   const allowLong = strategyMode !== "short_only";
@@ -3063,7 +3066,9 @@ function updateExecutionPanel() {
   const buildBlockedReasons = (side) => {
     const reasons = [];
     if (!autoEnabled) reasons.push("engine off");
-    if (halted) reasons.push("halted");
+    if (halted) {
+      reasons.push(haltType === "forward_guardrail" ? "guardrail pause" : "halted");
+    }
     if (sessionBlocked) reasons.push("session");
     if (!positionCapPass) reasons.push("position cap");
     if (!strengthPass) reasons.push("strength");
@@ -3138,6 +3143,14 @@ function updateExecutionPanel() {
       + `• 24h ${fmtPercent(change24h)} / ±${fmtNumber(maxAbsChangePct, 2)}%`
     )
     : "OFF";
+  const haltGatePrefix = haltType === "daily_risk"
+    ? "HALTED"
+    : "PAUSED";
+  const haltRemainingText = (
+    Number.isFinite(haltRemainingSeconds) && haltRemainingSeconds > 0
+      ? ` • ${fmtNumber(haltRemainingSeconds, 0)}s`
+      : ""
+  );
 
   setExecutionOutput(
     execOutMarketState,
@@ -3170,7 +3183,7 @@ function updateExecutionPanel() {
   setExecutionOutput(
     execOutHalt,
     halted
-      ? `HALTED • ${String(auto.halt_reason || "Risk guard active")}`
+      ? `${haltGatePrefix} • ${haltReason || "Risk guard active"}${haltRemainingText}`
       : "RUNNING",
   );
   setExecutionOutput(execOutActivePosition, activePositionText);
@@ -3578,6 +3591,7 @@ function renderAutoTrade(payload) {
   latestAutoTrade = data;
   const enabled = Boolean(data.enabled);
   const halted = Boolean(data.halted);
+  const haltType = String(data.halt_type || "");
   const paper = Boolean(data.paper_trading);
   const exchange = String(data.exchange || "-");
   const openPositions = Number(data.open_positions || 0);
@@ -3608,6 +3622,7 @@ function renderAutoTrade(payload) {
   const autoConvertMinUsdt = Number(data.auto_convert_min_usdt);
   const riskMultiplier = Number(data.risk_multiplier);
   const guardrailActive = Boolean(data.guardrail_active);
+  const guardrailHaltEnabled = Boolean(data.forward_guardrail_halt_enabled);
   const consecutiveLosses = Number(data.consecutive_losses || 0);
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
@@ -3636,13 +3651,20 @@ function renderAutoTrade(payload) {
     : strategyModeRaw === "short_only"
       ? "SHORT ONLY"
       : "LONG ONLY";
+  const haltStatusText = haltType === "daily_risk"
+    ? "Halted (Daily Risk)"
+    : haltType === "forward_guardrail"
+      ? "Paused (Guardrail)"
+      : haltType === "loss_streak"
+        ? "Paused (Loss Streak)"
+        : "Paused (Risk)";
 
   if (autoTradeStatusNode) {
     if (!enabled) {
       autoTradeStatusNode.textContent = "Disabled";
       autoTradeStatusNode.classList.remove("pos", "neg");
     } else if (halted) {
-      autoTradeStatusNode.textContent = "Halted (Risk Limit)";
+      autoTradeStatusNode.textContent = haltStatusText;
       autoTradeStatusNode.classList.add("neg");
       autoTradeStatusNode.classList.remove("pos");
     } else {
@@ -3729,7 +3751,10 @@ function renderAutoTrade(payload) {
       ? `${adaptiveProfile} (${emaSpanText} • AI>=${Number.isNaN(adaptiveAiMinConfidence) ? "-" : adaptiveAiMinConfidence}%, risk x${Number.isNaN(adaptiveRiskMultiplier) ? "-" : fmtNumber(adaptiveRiskMultiplier, 2)}, cd x${Number.isNaN(adaptiveCooldownMultiplier) ? "-" : fmtNumber(adaptiveCooldownMultiplier, 2)})`
       : "Adaptive OFF";
     const guardrailText = guardrailActive
-      ? `Guardrail ON x${Number.isNaN(riskMultiplier) ? "-" : fmtNumber(riskMultiplier, 2)}`
+      ? (
+        `Guardrail ON x${Number.isNaN(riskMultiplier) ? "-" : fmtNumber(riskMultiplier, 2)}`
+        + `${guardrailHaltEnabled ? "" : " size-only"}`
+      )
       : "Guardrail OFF";
     const autoConvertText = autoConvertToUsdt
       ? `Auto USDT ON (>=${Number.isNaN(autoConvertMinUsdt) ? "-" : fmtNumber(autoConvertMinUsdt, 2)} USDT)`

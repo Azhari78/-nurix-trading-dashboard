@@ -83,6 +83,28 @@ class TradingService:
         except ValueError:
             return None
 
+    @staticmethod
+    def _is_forward_guardrail_halt_reason(reason: Any) -> bool:
+        return str(reason or "").strip().lower().startswith("forward guardrail")
+
+    def _clear_disabled_forward_guardrail_halt_locked(self) -> bool:
+        if self.settings.auto_trade_forward_guardrail_halt_enabled:
+            return False
+        if not self._is_forward_guardrail_halt_reason(self.state.auto_trade_halt_reason):
+            return False
+
+        self.state.auto_trade_halt_until = 0.0
+        self.state.auto_trade_halt_reason = None
+        self.state.auto_trade_guardrail_halt_sample_key = ""
+        self.state.auto_trade_halt_reason_by_day = {
+            day_key: reason
+            for day_key, reason in self.state.auto_trade_halt_reason_by_day.items()
+            if not self._is_forward_guardrail_halt_reason(reason)
+        }
+        if "forward guardrail" in str(self.state.auto_trade_last_reason or "").lower():
+            self.state.auto_trade_last_reason = "Forward guardrail hard halt disabled; entries can resume"
+        return True
+
     def _prune_daily_pnl_history_locked(self, current_day_key: str | None = None) -> None:
         keep_days = max(1, int(self._daily_pnl_history_days))
         current_key = str(current_day_key or self.utc_day_key()).strip()
@@ -190,6 +212,11 @@ class TradingService:
             self.state.auto_trade_halt_until = float(safe_float(payload.get("auto_trade_halt_until")) or 0.0)
             halt_reason = payload.get("auto_trade_halt_reason")
             self.state.auto_trade_halt_reason = str(halt_reason).strip() if halt_reason else None
+            guardrail_sample_key = payload.get("auto_trade_guardrail_halt_sample_key")
+            self.state.auto_trade_guardrail_halt_sample_key = (
+                str(guardrail_sample_key).strip() if guardrail_sample_key else ""
+            )
+            self._clear_disabled_forward_guardrail_halt_locked()
             self.state.auto_trade_last_convert_at = float(
                 safe_float(payload.get("auto_trade_last_convert_at")) or 0.0
             )
@@ -249,6 +276,7 @@ class TradingService:
     def _build_runtime_state_payload(self) -> dict[str, Any]:
         with self.state.auto_trade_lock:
             self._prune_daily_pnl_history_locked(self.utc_day_key())
+            self._clear_disabled_forward_guardrail_halt_locked()
             payload: dict[str, Any] = {
                 "version": 1,
                 "saved_at": int(time.time()),
@@ -273,6 +301,9 @@ class TradingService:
                 "auto_trade_halt_until": float(self.state.auto_trade_halt_until),
                 "auto_trade_halt_reason": self.state.auto_trade_halt_reason,
                 "auto_trade_halt_reason_by_day": dict(self.state.auto_trade_halt_reason_by_day),
+                "auto_trade_guardrail_halt_sample_key": (
+                    self.state.auto_trade_guardrail_halt_sample_key
+                ),
                 "auto_trade_last_convert_at": float(self.state.auto_trade_last_convert_at),
                 "auto_trade_consecutive_losses": int(self.state.auto_trade_consecutive_losses),
                 "auto_trade_stats_by_symbol": {
@@ -807,18 +838,22 @@ class TradingService:
         if not self.settings.auto_trade_forward_guardrail_enabled:
             self.state.auto_trade_guardrail_active = False
             self.state.auto_trade_guardrail_reason = ""
+            self.state.auto_trade_guardrail_halt_sample_key = ""
             return 1.0, ""
 
         realized = self._recent_realized_trades(now_ts)
         if len(realized) < self.settings.auto_trade_forward_guardrail_min_trades:
             self.state.auto_trade_guardrail_active = False
             self.state.auto_trade_guardrail_reason = ""
+            self.state.auto_trade_guardrail_halt_sample_key = ""
             return 1.0, ""
 
         wins = sum(1 for row in realized if (safe_float(row.get("pnl_usdt")) or 0.0) >= 0)
         trade_count = len(realized)
         win_rate = wins / trade_count if trade_count > 0 else 0.0
         avg_pnl = sum(safe_float(row.get("pnl_usdt")) or 0.0 for row in realized) / trade_count
+        latest_realized_ts = max(int(row.get("timestamp") or 0) for row in realized)
+        halt_sample_key = f"{trade_count}:{latest_realized_ts}"
 
         baseline_win_rate = self.settings.auto_trade_forward_baseline_win_rate
         baseline_avg_pnl = self.settings.auto_trade_forward_baseline_avg_pnl_usdt
@@ -831,11 +866,16 @@ class TradingService:
             and trade_count >= max(5, self.settings.auto_trade_forward_guardrail_min_trades // 2)
         )
 
-        if severe and self.settings.auto_trade_forward_guardrail_halt_enabled:
+        if (
+            severe
+            and self.settings.auto_trade_forward_guardrail_halt_enabled
+            and self.state.auto_trade_guardrail_halt_sample_key != halt_sample_key
+        ):
             self.state.auto_trade_halt_until = max(
                 self.state.auto_trade_halt_until,
                 now_ts + self.settings.auto_trade_kill_switch_pause_seconds,
             )
+            self.state.auto_trade_guardrail_halt_sample_key = halt_sample_key
             self.state.auto_trade_halt_reason = (
                 f"Forward guardrail severe underperformance (win rate {win_rate:.0%})"
             )
@@ -853,6 +893,7 @@ class TradingService:
 
         self.state.auto_trade_guardrail_active = False
         self.state.auto_trade_guardrail_reason = ""
+        self.state.auto_trade_guardrail_halt_sample_key = ""
         return 1.0, ""
 
     def _volatility_size_multiplier(self, row: dict[str, Any]) -> float:
@@ -1756,6 +1797,7 @@ class TradingService:
                 self.state.auto_trade_daily_pnl[day_key] = 0.0
             if self.state.auto_trade_halt_day and self.state.auto_trade_halt_day != day_key:
                 self.state.auto_trade_halt_day = None
+            self._clear_disabled_forward_guardrail_halt_locked()
 
             self._maybe_send_daily_recap(now, day_key)
 
@@ -2405,6 +2447,7 @@ class TradingService:
             now = time.time()
             day_key = self.utc_day_key()
             self._prune_daily_pnl_history_locked(day_key)
+            self._clear_disabled_forward_guardrail_halt_locked()
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
             daily_pnl_history = self._daily_pnl_history_locked(limit_days=self._daily_pnl_history_days)
             daily_pnl_30d = sum(
@@ -2431,6 +2474,21 @@ class TradingService:
             )
             adaptive_short_stop_loss_pct, adaptive_short_take_profit_pct, adaptive_short_trailing_pct = (
                 self._side_stop_take_trail("SHORT", adaptive_profile_name)
+            )
+            halt_type: str | None = None
+            if self.state.auto_trade_halt_day == day_key:
+                halt_type = "daily_risk"
+            elif self.state.auto_trade_halt_until > now:
+                if self._is_forward_guardrail_halt_reason(self.state.auto_trade_halt_reason):
+                    halt_type = "forward_guardrail"
+                elif str(self.state.auto_trade_halt_reason or "").lower().startswith("consecutive losses"):
+                    halt_type = "loss_streak"
+                else:
+                    halt_type = "risk_pause"
+            halt_remaining_seconds = (
+                max(0, int(self.state.auto_trade_halt_until - now))
+                if self.state.auto_trade_halt_until > now
+                else 0
             )
 
             return {
@@ -2538,13 +2596,15 @@ class TradingService:
                 "daily_pnl_30d_usdt": round(daily_pnl_30d, 4),
                 "daily_pnl_history_days": self._daily_pnl_history_days,
                 "daily_loss_limit_usdt": round(self.settings.max_daily_loss_usdt, 4),
-                "halted": (
-                    self.state.auto_trade_halt_day == day_key
-                    or self.state.auto_trade_halt_until > now
-                ),
+                "halted": halt_type is not None,
+                "halt_type": halt_type,
                 "halt_until": int(self.state.auto_trade_halt_until),
+                "halt_remaining_seconds": halt_remaining_seconds,
                 "halt_reason": self.state.auto_trade_halt_reason,
                 "consecutive_losses": self.state.auto_trade_consecutive_losses,
+                "forward_guardrail_halt_enabled": (
+                    self.settings.auto_trade_forward_guardrail_halt_enabled
+                ),
                 "open_positions": len(self.state.auto_trade_positions),
                 "selected_position": position,
                 "recent_events": list(self.state.auto_trade_events)[-12:],

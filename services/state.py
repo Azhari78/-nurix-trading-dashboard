@@ -39,6 +39,7 @@ class RuntimeState:
         self.auto_trade_last_risk_multiplier = 1.0
         self.auto_trade_guardrail_active = False
         self.auto_trade_guardrail_reason = ""
+        self.auto_trade_guardrail_halt_sample_key = ""
         self.auto_trade_last_reason = "Waiting for market conditions"
         self.auto_trade_last_daily_recap_day: str | None = None
         self.auto_trade_adaptive_profile = "MIDDLE"
