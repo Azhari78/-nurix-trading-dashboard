@@ -1,0 +1,7 @@
+{
+  "name": "nurix-trading-dashboard",
+  "private": true,
+  "scripts": {
+    "build": "python -m pip install --upgrade pip && python -m pip install -r requirements.txt"
+  }
+}
