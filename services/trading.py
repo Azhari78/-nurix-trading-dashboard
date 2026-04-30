@@ -4,15 +4,22 @@ import json
 import logging
 import random
 import time
+from collections import deque
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from services.advanced_ai import (
+    build_time_series_cv_report,
+    ensure_model_stats,
+    update_advanced_model_stats,
+)
 from services.alerts import AlertService
 from services.config import Settings
 from services.exchange import ExchangeGateway
 from services.indicators import safe_float
+from services.performance import build_performance_analytics
 from services.state import RuntimeState
 
 
@@ -53,6 +60,7 @@ class TradingService:
         )
         self._last_state_save_at = 0.0
         self._daily_pnl_history_days = 30
+        ensure_model_stats(self.state)
         self._load_persisted_runtime_state()
 
     def _state_persistence_enabled(self) -> bool:
@@ -224,12 +232,60 @@ class TradingService:
                 0,
                 int(safe_float(payload.get("auto_trade_consecutive_losses")) or 0),
             )
+            self.state.auto_trade_consecutive_wins = max(
+                0,
+                int(safe_float(payload.get("auto_trade_consecutive_wins")) or 0),
+            )
+            self.state.auto_trade_profit_lock_day = (
+                str(payload.get("auto_trade_profit_lock_day")).strip()
+                if payload.get("auto_trade_profit_lock_day") is not None
+                else None
+            ) or None
+            self.state.auto_trade_profit_lock_active = bool(
+                payload.get("auto_trade_profit_lock_active", False)
+            )
+            self.state.auto_trade_profit_lock_reason = str(
+                payload.get("auto_trade_profit_lock_reason") or ""
+            )
+            self.state.auto_trade_daily_peak_pnl_usdt = float(
+                safe_float(payload.get("auto_trade_daily_peak_pnl_usdt")) or 0.0
+            )
+            self.state.auto_trade_peak_equity_usdt = max(
+                0.0,
+                float(safe_float(payload.get("auto_trade_peak_equity_usdt")) or 0.0),
+            )
+            self.state.auto_trade_current_drawdown_pct = max(
+                0.0,
+                float(safe_float(payload.get("auto_trade_current_drawdown_pct")) or 0.0),
+            )
+            self.state.auto_trade_max_drawdown_pct = max(
+                0.0,
+                float(safe_float(payload.get("auto_trade_max_drawdown_pct")) or 0.0),
+            )
+            self_learning = payload.get("auto_trade_self_learning")
+            if isinstance(self_learning, dict):
+                self.state.auto_trade_self_learning.update(dict(self_learning))
             stats_by_symbol = payload.get("auto_trade_stats_by_symbol")
             if isinstance(stats_by_symbol, dict):
                 self.state.auto_trade_stats_by_symbol = {
                     str(symbol).upper(): dict(stats)
                     for symbol, stats in stats_by_symbol.items()
                     if str(symbol).strip() and isinstance(stats, dict)
+                }
+            model_stats = payload.get("advanced_ai_model_stats")
+            if isinstance(model_stats, dict):
+                self.state.advanced_ai_model_stats = {
+                    str(name): dict(stats)
+                    for name, stats in model_stats.items()
+                    if str(name).strip() and isinstance(stats, dict)
+                }
+                ensure_model_stats(self.state)
+            lstm_state = payload.get("auto_trade_lstm_state")
+            if isinstance(lstm_state, dict):
+                self.state.auto_trade_lstm_state = {
+                    str(symbol).upper(): dict(values)
+                    for symbol, values in lstm_state.items()
+                    if str(symbol).strip() and isinstance(values, dict)
                 }
             journal_rows = payload.get("auto_trade_journal")
             if isinstance(journal_rows, list):
@@ -306,10 +362,33 @@ class TradingService:
                 ),
                 "auto_trade_last_convert_at": float(self.state.auto_trade_last_convert_at),
                 "auto_trade_consecutive_losses": int(self.state.auto_trade_consecutive_losses),
+                "auto_trade_consecutive_wins": int(self.state.auto_trade_consecutive_wins),
+                "auto_trade_profit_lock_day": self.state.auto_trade_profit_lock_day,
+                "auto_trade_profit_lock_active": bool(self.state.auto_trade_profit_lock_active),
+                "auto_trade_profit_lock_reason": self.state.auto_trade_profit_lock_reason,
+                "auto_trade_daily_peak_pnl_usdt": float(
+                    self.state.auto_trade_daily_peak_pnl_usdt
+                ),
+                "auto_trade_peak_equity_usdt": float(self.state.auto_trade_peak_equity_usdt),
+                "auto_trade_current_drawdown_pct": float(
+                    self.state.auto_trade_current_drawdown_pct
+                ),
+                "auto_trade_max_drawdown_pct": float(self.state.auto_trade_max_drawdown_pct),
+                "auto_trade_self_learning": dict(self.state.auto_trade_self_learning),
                 "auto_trade_stats_by_symbol": {
                     str(symbol): dict(stats)
                     for symbol, stats in self.state.auto_trade_stats_by_symbol.items()
                     if isinstance(stats, dict)
+                },
+                "advanced_ai_model_stats": {
+                    str(name): dict(stats)
+                    for name, stats in self.state.advanced_ai_model_stats.items()
+                    if isinstance(stats, dict)
+                },
+                "auto_trade_lstm_state": {
+                    str(symbol): dict(values)
+                    for symbol, values in self.state.auto_trade_lstm_state.items()
+                    if isinstance(values, dict)
                 },
                 "auto_trade_journal": list(self.state.auto_trade_journal),
             }
@@ -508,9 +587,11 @@ class TradingService:
         stats["pnl_usdt"] += pnl_usdt
         if pnl_usdt >= 0:
             stats["wins"] += 1
+            self.state.auto_trade_consecutive_wins += 1
             self.state.auto_trade_consecutive_losses = 0
         else:
             stats["losses"] += 1
+            self.state.auto_trade_consecutive_wins = 0
             self.state.auto_trade_consecutive_losses += 1
 
     def _copy_trade_is_enabled(self) -> bool:
@@ -700,6 +781,15 @@ class TradingService:
         median_atr = atr_values[len(atr_values) // 2] if atr_values else 0.0
         avg_ai_conf = sum(ai_conf_values) / len(ai_conf_values) if ai_conf_values else 0.0
         loss_streak = self.state.auto_trade_consecutive_losses
+        regime_counts: dict[str, int] = {}
+        for row in scoped_rows:
+            regime = str(row.get("market_regime") or "SIDEWAYS").upper()
+            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        dominant_regime = (
+            max(regime_counts.items(), key=lambda item: item[1])[0]
+            if regime_counts
+            else "SIDEWAYS"
+        )
 
         profile_name = "MIDDLE"
         risk_mult = 1.0
@@ -709,6 +799,7 @@ class TradingService:
         if (
             median_atr >= self.settings.auto_trade_auto_adapt_high_atr_pct
             or loss_streak >= max(2, self.settings.auto_trade_max_consecutive_losses - 1)
+            or dominant_regime in {"HIGH_VOL", "CHOP"}
         ):
             profile_name = "WEAK"
             risk_mult = self.settings.auto_trade_auto_adapt_risk_off_mult
@@ -718,6 +809,7 @@ class TradingService:
             median_atr <= self.settings.auto_trade_auto_adapt_low_atr_pct
             and avg_ai_conf >= max(40, base_conf)
             and loss_streak == 0
+            and dominant_regime in {"BULL", "BEAR", "SIDEWAYS"}
         ):
             profile_name = "STRONG"
             risk_mult = self.settings.auto_trade_auto_adapt_risk_on_mult
@@ -726,7 +818,7 @@ class TradingService:
 
         reason = (
             f"{profile_name}: ATR~{median_atr:.2f}% • AI~{avg_ai_conf:.0f}% • "
-            f"loss streak {loss_streak}"
+            f"regime {dominant_regime} • loss streak {loss_streak}"
         )
         profile = {
             "name": profile_name,
@@ -896,6 +988,604 @@ class TradingService:
         self.state.auto_trade_guardrail_halt_sample_key = ""
         return 1.0, ""
 
+    def _update_price_history(self, market_rows: list[dict[str, Any]]) -> None:
+        lookback = max(10, int(self.settings.auto_trade_correlation_lookback))
+        for row in market_rows:
+            symbol = str(row.get("symbol") or "").upper()
+            price = safe_float(row.get("price"))
+            if not symbol or price is None or price <= 0:
+                continue
+            history = self.state.risk_price_history.get(symbol)
+            if history is None or history.maxlen != lookback:
+                existing = list(history or [])[-lookback + 1 :]
+                history = deque(existing, maxlen=lookback)
+                self.state.risk_price_history[symbol] = history
+            if not history or abs(float(history[-1]) - price) > 1e-12:
+                history.append(float(price))
+
+    @staticmethod
+    def _returns_from_prices(prices: list[float]) -> list[float]:
+        returns: list[float] = []
+        for index in range(1, len(prices)):
+            previous = prices[index - 1]
+            current = prices[index]
+            if previous > 0 and current > 0:
+                returns.append((current - previous) / previous)
+        return returns
+
+    @staticmethod
+    def _pearson(a: list[float], b: list[float]) -> float | None:
+        length = min(len(a), len(b))
+        if length < 8:
+            return None
+        left = a[-length:]
+        right = b[-length:]
+        mean_left = sum(left) / length
+        mean_right = sum(right) / length
+        numerator = sum((x - mean_left) * (y - mean_right) for x, y in zip(left, right))
+        denom_left = sum((x - mean_left) ** 2 for x in left)
+        denom_right = sum((y - mean_right) ** 2 for y in right)
+        denominator = (denom_left * denom_right) ** 0.5
+        if denominator <= 1e-12:
+            return None
+        return numerator / denominator
+
+    def _correlation_risk_multiplier(self, row: dict[str, Any], side: str) -> tuple[float, str]:
+        if not self.settings.auto_trade_correlation_risk_enabled:
+            return 1.0, ""
+
+        symbol = str(row.get("symbol") or "").upper()
+        candidate_history = self.state.risk_price_history.get(symbol)
+        if not candidate_history:
+            return 1.0, ""
+        candidate_returns = self._returns_from_prices(list(candidate_history))
+        if len(candidate_returns) < 8:
+            return 1.0, ""
+
+        max_abs_corr = 0.0
+        max_symbol = ""
+        for open_symbol, position in self.state.auto_trade_positions.items():
+            if str(open_symbol).upper() == symbol:
+                continue
+            open_side = self._normalize_side(position.get("side"))
+            if open_side != side:
+                continue
+            open_history = self.state.risk_price_history.get(str(open_symbol).upper())
+            if not open_history:
+                continue
+            corr = self._pearson(candidate_returns, self._returns_from_prices(list(open_history)))
+            if corr is None:
+                continue
+            if abs(corr) > abs(max_abs_corr):
+                max_abs_corr = corr
+                max_symbol = str(open_symbol).upper()
+
+        threshold = self.settings.auto_trade_max_correlation
+        if abs(max_abs_corr) < threshold:
+            return 1.0, ""
+
+        mult = self.settings.auto_trade_correlation_risk_mult
+        reason = f"corr {max_abs_corr:.2f} vs {max_symbol} >= {threshold:.2f}, size x{mult:.2f}"
+        return mult, reason
+
+    def _kelly_sizing_fraction_pct(self, row: dict[str, Any]) -> tuple[float | None, dict[str, Any]]:
+        if not self.settings.auto_trade_kelly_enabled:
+            return None, {"enabled": False}
+
+        symbol = str(row.get("symbol") or "").upper()
+        realized = [
+            item
+            for item in self.state.auto_trade_journal
+            if item.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
+            and safe_float(item.get("pnl_usdt")) is not None
+        ]
+        symbol_realized = [
+            item
+            for item in realized
+            if str(item.get("symbol") or "").upper() == symbol
+        ]
+        sample = symbol_realized if len(symbol_realized) >= self.settings.auto_trade_kelly_min_trades else realized
+        if len(sample) < self.settings.auto_trade_kelly_min_trades:
+            return None, {
+                "enabled": True,
+                "ready": False,
+                "trades": len(sample),
+                "min_trades": self.settings.auto_trade_kelly_min_trades,
+            }
+
+        pnl_values = [float(safe_float(item.get("pnl_usdt")) or 0.0) for item in sample[-80:]]
+        wins = [value for value in pnl_values if value > 0]
+        losses = [abs(value) for value in pnl_values if value < 0]
+        win_rate = len(wins) / len(pnl_values) if pnl_values else 0.0
+        avg_win = sum(wins) / len(wins) if wins else 0.0
+        avg_loss = sum(losses) / len(losses) if losses else 0.0
+        payoff = avg_win / avg_loss if avg_loss > 1e-12 else 0.0
+        raw_kelly = win_rate - ((1.0 - win_rate) / payoff) if payoff > 0 else 0.0
+        safe_kelly = self._clamp(raw_kelly * self.settings.auto_trade_kelly_fraction, 0.0, 1.0)
+        fraction_pct = min(
+            self.settings.auto_trade_kelly_max_fraction_pct,
+            safe_kelly * 100.0,
+        )
+        return fraction_pct, {
+            "enabled": True,
+            "ready": True,
+            "trades": len(pnl_values),
+            "win_rate": round(win_rate, 4),
+            "payoff": round(payoff, 4),
+            "raw_fraction_pct": round(raw_kelly * 100.0, 4),
+            "fraction_pct": round(fraction_pct, 4),
+        }
+
+    def _update_drawdown_guard(
+        self,
+        wallet_payload: dict[str, Any] | None,
+        *,
+        now_ts: float,
+        day_key: str,
+    ) -> tuple[bool, str]:
+        if not self.settings.auto_trade_max_drawdown_enabled:
+            return False, ""
+
+        equity = safe_float((wallet_payload or {}).get("total_usdt_estimate"))
+        if equity is None or equity <= 0:
+            if self.settings.paper_trading and self.settings.paper_wallet_enabled:
+                with self.state.wallet_lock:
+                    equity = (
+                        float(self.state.paper_wallet_free_usdt)
+                        + float(self.state.paper_wallet_used_usdt)
+                    )
+            if equity is None or equity <= 0:
+                return False, ""
+
+        if self.state.auto_trade_peak_equity_usdt <= 0:
+            self.state.auto_trade_peak_equity_usdt = float(equity)
+        if equity > self.state.auto_trade_peak_equity_usdt:
+            self.state.auto_trade_peak_equity_usdt = float(equity)
+
+        peak = max(1e-9, self.state.auto_trade_peak_equity_usdt)
+        drawdown_pct = max(0.0, (peak - float(equity)) / peak * 100.0)
+        self.state.auto_trade_current_drawdown_pct = drawdown_pct
+        self.state.auto_trade_max_drawdown_pct = max(
+            self.state.auto_trade_max_drawdown_pct,
+            drawdown_pct,
+        )
+
+        if drawdown_pct < self.settings.auto_trade_max_drawdown_pct:
+            return False, ""
+
+        self.state.auto_trade_halt_until = max(
+            self.state.auto_trade_halt_until,
+            now_ts + self.settings.auto_trade_kill_switch_pause_seconds,
+        )
+        self.state.auto_trade_halt_reason = (
+            f"Max drawdown {drawdown_pct:.2f}% >= {self.settings.auto_trade_max_drawdown_pct:.2f}%"
+        )
+        self.state.auto_trade_halt_reason_by_day[day_key] = str(
+            self.state.auto_trade_halt_reason
+        )
+        return True, str(self.state.auto_trade_halt_reason)
+
+    def _derive_self_learning_adjustment(self, performance: dict[str, Any]) -> dict[str, Any]:
+        if not self.settings.auto_trade_self_learning_enabled:
+            adjustment = {
+                "enabled": False,
+                "risk_mult": 1.0,
+                "ai_conf_delta": 0,
+                "stop_mult": 1.0,
+                "take_profit_mult": 1.0,
+                "reason": "Self-learning disabled",
+            }
+            self.state.auto_trade_self_learning = adjustment
+            return adjustment
+
+        trades = int(safe_float(performance.get("trade_count")) or 0)
+        if trades < self.settings.auto_trade_self_learning_min_trades:
+            adjustment = {
+                "enabled": True,
+                "risk_mult": 1.0,
+                "ai_conf_delta": 0,
+                "stop_mult": 1.0,
+                "take_profit_mult": 1.0,
+                "reason": (
+                    f"Waiting for trades {trades}/"
+                    f"{self.settings.auto_trade_self_learning_min_trades}"
+                ),
+            }
+            self.state.auto_trade_self_learning = adjustment
+            return adjustment
+
+        win_rate = float(safe_float(performance.get("win_rate")) or 0.0)
+        profit_factor = float(safe_float(performance.get("profit_factor")) or 0.0)
+        sharpe = float(safe_float(performance.get("sharpe_ratio")) or 0.0)
+        drawdown_pct = float(safe_float(performance.get("max_drawdown_pct")) or 0.0)
+
+        risk_mult = 1.0
+        ai_delta = 0
+        stop_mult = 1.0
+        tp_mult = 1.0
+        if profit_factor >= 1.35 and win_rate >= 0.52 and sharpe >= 0:
+            risk_mult = 1.1
+            ai_delta = -3
+            tp_mult = 1.08
+        elif profit_factor < 1.0 or win_rate < 0.45 or drawdown_pct >= 8.0:
+            risk_mult = 0.75
+            ai_delta = 8
+            stop_mult = 0.85
+            tp_mult = 0.9
+
+        risk_mult = self._clamp(
+            risk_mult,
+            self.settings.auto_trade_self_learning_risk_min_mult,
+            self.settings.auto_trade_self_learning_risk_max_mult,
+        )
+        adjustment = {
+            "enabled": True,
+            "risk_mult": round(risk_mult, 4),
+            "ai_conf_delta": ai_delta,
+            "stop_mult": round(stop_mult, 4),
+            "take_profit_mult": round(tp_mult, 4),
+            "reason": (
+                f"PF {profit_factor:.2f} • win {win_rate:.0%} • "
+                f"Sharpe {sharpe:.2f} • DD {drawdown_pct:.2f}%"
+            ),
+        }
+        self.state.auto_trade_self_learning = adjustment
+        return adjustment
+
+    def _daily_loss_limit_details(
+        self,
+        wallet_payload: dict[str, Any] | None,
+    ) -> tuple[float, str]:
+        absolute_limit = max(0.0, float(self.settings.max_daily_loss_usdt))
+        pct_limit = 0.0
+        pct_basis = 0.0
+        if self.settings.auto_trade_max_daily_loss_pct > 0:
+            day_start = safe_float((wallet_payload or {}).get("day_start_total_usdt"))
+            if day_start is None or day_start <= 0:
+                with self.state.wallet_lock:
+                    day_start = self.state.wallet_day_start_total_usdt
+            if day_start is not None and day_start > 0:
+                pct_basis = float(day_start)
+                pct_limit = day_start * (self.settings.auto_trade_max_daily_loss_pct / 100.0)
+
+        if absolute_limit > 0 and pct_limit > 0:
+            if pct_limit <= absolute_limit:
+                return (
+                    pct_limit,
+                    (
+                        f"{self.settings.auto_trade_max_daily_loss_pct:.2f}% "
+                        f"of day equity {pct_basis:.2f}"
+                    ),
+                )
+            return absolute_limit, "absolute USDT cap"
+        if pct_limit > 0:
+            return (
+                pct_limit,
+                (
+                    f"{self.settings.auto_trade_max_daily_loss_pct:.2f}% "
+                    f"of day equity {pct_basis:.2f}"
+                ),
+            )
+        if absolute_limit > 0:
+            return absolute_limit, "absolute USDT cap"
+        return 0.0, "disabled"
+
+    def _daily_loss_limit_usdt(self, wallet_payload: dict[str, Any] | None) -> float:
+        limit, _ = self._daily_loss_limit_details(wallet_payload)
+        return limit
+
+    def _profit_lock_multiplier(
+        self,
+        *,
+        day_key: str,
+        daily_pnl: float,
+        now_ts: float,
+    ) -> tuple[float, str, bool]:
+        if not self.settings.auto_trade_profit_lock_enabled:
+            self.state.auto_trade_profit_lock_active = False
+            self.state.auto_trade_profit_lock_reason = ""
+            return 1.0, "", False
+
+        if self.state.auto_trade_profit_lock_day != day_key:
+            self.state.auto_trade_profit_lock_day = day_key
+            self.state.auto_trade_daily_peak_pnl_usdt = max(0.0, daily_pnl)
+            self.state.auto_trade_profit_lock_active = False
+            self.state.auto_trade_profit_lock_reason = ""
+
+        if daily_pnl > self.state.auto_trade_daily_peak_pnl_usdt:
+            self.state.auto_trade_daily_peak_pnl_usdt = daily_pnl
+
+        peak = self.state.auto_trade_daily_peak_pnl_usdt
+        trigger = self.settings.auto_trade_profit_lock_trigger_usdt
+        if peak < trigger or peak <= 0:
+            return 1.0, "", False
+
+        locked_profit = peak * (1.0 - self.settings.auto_trade_profit_lock_giveback_pct / 100.0)
+        giveback = peak - daily_pnl
+        reason = (
+            f"profit lock active: peak {peak:.2f} USDT, "
+            f"floor {locked_profit:.2f} USDT"
+        )
+        self.state.auto_trade_profit_lock_active = True
+        self.state.auto_trade_profit_lock_reason = reason
+
+        if daily_pnl <= locked_profit:
+            halt_reason = (
+                f"Daily profit lock hit: PnL {daily_pnl:.2f} <= floor {locked_profit:.2f} "
+                f"(giveback {giveback:.2f})"
+            )
+            self.state.auto_trade_halt_until = max(
+                self.state.auto_trade_halt_until,
+                now_ts + self.settings.auto_trade_profit_lock_pause_seconds,
+            )
+            self.state.auto_trade_halt_reason = halt_reason
+            self.state.auto_trade_halt_reason_by_day[day_key] = halt_reason
+            self.state.auto_trade_profit_lock_reason = halt_reason
+            return self.settings.auto_trade_profit_lock_risk_mult, halt_reason, True
+
+        return self.settings.auto_trade_profit_lock_risk_mult, reason, False
+
+    def _confidence_sizing_multiplier(self, row: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+        if not self.settings.auto_trade_confidence_sizing_enabled:
+            return 1.0, {"enabled": False}
+
+        confidence = safe_float(row.get("ai_confidence")) or 0.0
+        probability = safe_float(row.get("entry_probability")) or confidence
+        blended = self._clamp((confidence * 0.65) + (probability * 0.35), 0.0, 100.0)
+        low = self.settings.auto_trade_confidence_size_min_mult
+        high = self.settings.auto_trade_confidence_size_max_mult
+        mult = low + ((blended / 100.0) * (high - low))
+        return mult, {
+            "enabled": True,
+            "confidence": round(confidence, 2),
+            "probability": round(probability, 2),
+            "mult": round(mult, 4),
+        }
+
+    def _regime_sizing_multiplier(self, row: dict[str, Any], side: str) -> tuple[float, dict[str, Any]]:
+        if not self.settings.auto_trade_regime_sizing_enabled:
+            return 1.0, {"enabled": False}
+
+        regime = str(row.get("market_regime") or "SIDEWAYS").upper()
+        aligned = (side == "LONG" and regime == "BULL") or (side == "SHORT" and regime == "BEAR")
+        opposed = (side == "LONG" and regime == "BEAR") or (side == "SHORT" and regime == "BULL")
+        if aligned:
+            mult = self.settings.auto_trade_regime_risk_on_mult
+        elif opposed or regime in {"HIGH_VOL", "CHOP"}:
+            mult = self.settings.auto_trade_regime_risk_off_mult
+        else:
+            mult = 1.0
+        return mult, {"enabled": True, "regime": regime, "mult": round(mult, 4)}
+
+    def _compounding_multiplier(self) -> tuple[float, dict[str, Any]]:
+        if not self.settings.auto_trade_compounding_enabled:
+            return 1.0, {"enabled": False}
+
+        day_key = self.utc_day_key()
+        daily_pnl = max(0.0, float(self.state.auto_trade_daily_pnl.get(day_key, 0.0)))
+        step = max(0.01, self.settings.auto_trade_compounding_profit_step_usdt)
+        profit_steps = min(6.0, daily_pnl / step)
+        win_boost = min(0.18, max(0, self.state.auto_trade_consecutive_wins) * 0.03)
+        mult = 1.0 + (profit_steps * 0.04) + win_boost
+        mult = min(self.settings.auto_trade_compounding_max_mult, mult)
+        if self.state.auto_trade_consecutive_losses > 0:
+            mult = min(mult, 1.0)
+        return mult, {
+            "enabled": True,
+            "daily_pnl_usdt": round(daily_pnl, 4),
+            "consecutive_wins": self.state.auto_trade_consecutive_wins,
+            "mult": round(mult, 4),
+        }
+
+    def _lstm_bias_score(self, symbol: str, side: str) -> float:
+        if not self.settings.auto_trade_lstm_learning_enabled:
+            return 0.0
+        state = self.state.auto_trade_lstm_state.get(str(symbol).upper(), {})
+        hidden = float(safe_float(state.get("hidden")) or 0.0)
+        return hidden if side == "LONG" else -hidden
+
+    def _update_lstm_learning(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        pnl_pct: float,
+    ) -> None:
+        if not self.settings.auto_trade_lstm_learning_enabled:
+            return
+
+        key = str(symbol or "").upper()
+        if not key:
+            return
+        lr = self.settings.auto_trade_lstm_learning_rate
+        state = self.state.auto_trade_lstm_state.setdefault(
+            key,
+            {"hidden": 0.0, "cell": 0.0, "updates": 0, "confidence": 0.0},
+        )
+        hidden = float(safe_float(state.get("hidden")) or 0.0)
+        cell = float(safe_float(state.get("cell")) or 0.0)
+        outcome = self._clamp(float(pnl_pct) / 5.0, -1.0, 1.0)
+        directional_outcome = outcome if side == "LONG" else -outcome
+        forget_gate = 1.0 - lr
+        input_gate = lr
+        cell = (cell * forget_gate) + (directional_outcome * input_gate)
+        hidden = self._clamp(cell, -1.0, 1.0)
+        updates = int(safe_float(state.get("updates")) or 0) + 1
+        state.update(
+            {
+                "hidden": round(hidden, 6),
+                "cell": round(cell, 6),
+                "updates": updates,
+                "confidence": round(min(100.0, updates * 4.0), 2),
+            }
+        )
+
+    def _entry_quality_state(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str,
+    ) -> dict[str, Any]:
+        ai_bias = str(row.get("ai_bias") or "HOLD").upper()
+        ai_confidence = safe_float(row.get("ai_confidence")) or 0.0
+        quantum_confidence = safe_float(row.get("quantum_confidence")) or 0.0
+        strength_confidence = safe_float(row.get("strength_confidence")) or 0.0
+        volume_ratio = safe_float(row.get("volume_ratio")) or 0.0
+        liquidity_score = safe_float(row.get("liquidity_score")) or 0.0
+        sentiment_bias = str(row.get("sentiment_bias") or "HOLD").upper()
+        sentiment_confidence = safe_float(row.get("sentiment_confidence")) or 0.0
+        micro_bias = str(row.get("microstructure_bias") or "NEUTRAL").upper()
+        regime = str(row.get("market_regime") or "SIDEWAYS").upper()
+        spread_pct = safe_float(row.get("spread_pct")) or 0.0
+        symbol = str(row.get("symbol") or "").upper()
+
+        desired_bias = "BUY" if side == "LONG" else "SELL"
+        technical_ok, _ = self._rule_allows_side(row, side, profile_name)
+        _, _, _, exit_meta = self._dynamic_exit_profile(row, side, profile_name)
+        stop_loss_pct, take_profit_pct, _, _ = self._dynamic_exit_profile(row, side, profile_name)
+        total_cost_pct = max(0.0, spread_pct) + self.settings.auto_trade_estimated_fee_pct + self.settings.auto_trade_estimated_slippage_pct
+        risk_reward = (take_profit_pct - total_cost_pct) / max(0.1, stop_loss_pct)
+
+        score = 0.0
+        score += 25.0 * (ai_confidence / 100.0) if ai_bias == desired_bias else 0.0
+        score += 15.0 * (quantum_confidence / 100.0)
+        score += 18.0 if technical_ok else 0.0
+        score += 12.0 * min(1.0, strength_confidence / 100.0)
+        score += 8.0 * min(1.0, max(0.0, volume_ratio) / 1.5)
+        score += 7.0 * min(1.0, max(0.0, liquidity_score) / 25.0)
+        score += 7.0 * (sentiment_confidence / 100.0) if sentiment_bias in {desired_bias, "HOLD"} else 0.0
+        score += 5.0 if micro_bias in {desired_bias, "NEUTRAL"} else 0.0
+        aligned_regime = (side == "LONG" and regime == "BULL") or (side == "SHORT" and regime == "BEAR")
+        if aligned_regime:
+            score += 5.0
+        elif regime in {"SIDEWAYS", "CHOP"}:
+            score += 2.0
+        score += self._clamp(self._lstm_bias_score(symbol, side), -1.0, 1.0) * 4.0
+        score -= min(12.0, spread_pct * 80.0)
+
+        score = self._clamp(score, 0.0, 100.0)
+        probability = self._clamp(
+            42.0 + (score * 0.46) + (ai_confidence * 0.16) + (quantum_confidence * 0.08),
+            0.0,
+            99.0,
+        )
+        return {
+            "enabled": self.settings.auto_trade_entry_quality_enabled,
+            "score": round(score, 2),
+            "probability": round(probability, 2),
+            "risk_reward": round(risk_reward, 3),
+            "technical_ok": technical_ok,
+            "liquidity_score": round(liquidity_score, 2),
+            "exit": exit_meta,
+        }
+
+    def _quality_gate_allows(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str,
+    ) -> tuple[bool, str, dict[str, Any]]:
+        quality = self._entry_quality_state(row, side, profile_name)
+        row["entry_quality"] = quality
+        row["entry_score"] = quality["score"]
+        row["entry_probability"] = quality["probability"]
+        row["entry_risk_reward"] = quality["risk_reward"]
+
+        if not self.settings.auto_trade_entry_quality_enabled:
+            return True, "", quality
+        if quality["score"] < self.settings.auto_trade_min_entry_score:
+            return False, f"entry score {quality['score']:.1f} < {self.settings.auto_trade_min_entry_score}", quality
+        if quality["probability"] < self.settings.auto_trade_min_entry_probability:
+            return False, f"probability {quality['probability']:.1f}% < {self.settings.auto_trade_min_entry_probability}%", quality
+        if quality["risk_reward"] < self.settings.auto_trade_min_risk_reward:
+            return False, f"RR {quality['risk_reward']:.2f} < {self.settings.auto_trade_min_risk_reward:.2f}", quality
+        if self.settings.auto_trade_min_liquidity_score > 0 and quality["liquidity_score"] < self.settings.auto_trade_min_liquidity_score:
+            return False, f"liquidity {quality['liquidity_score']:.1f} < {self.settings.auto_trade_min_liquidity_score:.1f}", quality
+        return True, "", quality
+
+    def _correlation_position_limit_allows(self, row: dict[str, Any], side: str) -> tuple[bool, str]:
+        if not self.settings.auto_trade_correlation_risk_enabled:
+            return True, ""
+        symbol = str(row.get("symbol") or "").upper()
+        candidate_history = self.state.risk_price_history.get(symbol)
+        if not candidate_history:
+            return True, ""
+        candidate_returns = self._returns_from_prices(list(candidate_history))
+        if len(candidate_returns) < 8:
+            return True, ""
+
+        correlated = 0
+        examples: list[str] = []
+        for open_symbol, position in self.state.auto_trade_positions.items():
+            if self._normalize_side(position.get("side")) != side:
+                continue
+            open_history = self.state.risk_price_history.get(str(open_symbol).upper())
+            if not open_history:
+                continue
+            corr = self._pearson(candidate_returns, self._returns_from_prices(list(open_history)))
+            if corr is not None and abs(corr) >= self.settings.auto_trade_max_correlation:
+                correlated += 1
+                examples.append(f"{open_symbol}:{corr:.2f}")
+
+        if correlated >= self.settings.auto_trade_max_correlated_positions:
+            return (
+                False,
+                (
+                    f"correlated positions {correlated} >= "
+                    f"{self.settings.auto_trade_max_correlated_positions} "
+                    f"({', '.join(examples[:3])})"
+                ),
+            )
+        return True, ""
+
+    def _circuit_breaker_check(
+        self,
+        market_rows: list[dict[str, Any]],
+        *,
+        now_ts: float,
+        day_key: str,
+    ) -> tuple[bool, str]:
+        if not self.settings.auto_trade_circuit_breaker_enabled:
+            return False, ""
+
+        scoped_rows = [
+            row
+            for row in market_rows
+            if str(row.get("symbol") or "") in self._runtime_auto_trade_symbols_set
+            and not row.get("error")
+        ]
+        if not scoped_rows:
+            return False, ""
+
+        volatile_count = 0
+        for row in scoped_rows:
+            atr_pct = safe_float(row.get("atr_pct"))
+            change_24h = safe_float(row.get("change_24h"))
+            atr_extreme = (
+                atr_pct is not None
+                and atr_pct > self.settings.auto_trade_max_atr_pct
+            )
+            change_extreme = (
+                change_24h is not None
+                and abs(change_24h) > self.settings.auto_trade_max_abs_change_24h_pct
+            )
+            if atr_extreme or change_extreme:
+                volatile_count += 1
+
+        if volatile_count < self.settings.auto_trade_circuit_breaker_volatility_symbols:
+            return False, ""
+
+        reason = (
+            f"Circuit breaker: {volatile_count} tracked symbols in extreme volatility"
+        )
+        self.state.auto_trade_halt_until = max(
+            self.state.auto_trade_halt_until,
+            now_ts + self.settings.auto_trade_kill_switch_pause_seconds,
+        )
+        self.state.auto_trade_halt_reason = reason
+        self.state.auto_trade_halt_reason_by_day[day_key] = reason
+        return True, reason
+
     def _volatility_size_multiplier(self, row: dict[str, Any]) -> float:
         if not self.settings.auto_trade_volatility_sizing_enabled:
             return 1.0
@@ -988,12 +1678,26 @@ class TradingService:
         rsi = safe_float(row.get("rsi"))
         macd = safe_float(row.get("macd"))
         macd_signal = safe_float(row.get("macd_signal"))
+        micro_pressure = safe_float(row.get("microstructure_pressure")) or 0.0
+        sentiment_score = safe_float(row.get("sentiment_score")) or 0.0
+        quantum_confidence = safe_float(row.get("quantum_confidence")) or 0.0
+        hurst_exponent = safe_float(row.get("hurst_exponent")) or 0.5
 
         score = 0.0
         score += ai_confidence * 0.42
         score += strength_confidence * 0.28
         score += self._clamp(volume_ratio, 0.0, 2.0) * 20.0
         score += self._clamp(ai_score_abs, 0.0, 5.0) * 6.0
+        score += self._clamp(quantum_confidence, 0.0, 100.0) * 0.06
+
+        directional_micro = micro_pressure if side == "LONG" else -micro_pressure
+        directional_sentiment = sentiment_score if side == "LONG" else -sentiment_score
+        score += self._clamp(directional_micro / 50.0, -1.0, 1.0) * 6.0
+        score += self._clamp(directional_sentiment / 100.0, -1.0, 1.0) * 5.0
+        if hurst_exponent >= 0.55:
+            score += 4.0
+        elif hurst_exponent <= 0.42:
+            score -= 3.0
 
         if atr_pct > 0:
             atr_target = max(0.05, self.settings.auto_trade_target_atr_pct)
@@ -1409,6 +2113,82 @@ class TradingService:
             max(0.0, trailing_pct * trail_mult),
         )
 
+    def _dynamic_exit_profile(
+        self,
+        row: dict[str, Any],
+        side: str,
+        profile_name: str,
+    ) -> tuple[float, float, float, dict[str, Any]]:
+        stop_loss_pct, take_profit_pct, trailing_pct = self._side_stop_take_trail(
+            side,
+            profile_name,
+        )
+        if not self.settings.auto_trade_dynamic_exit_enabled:
+            return stop_loss_pct, take_profit_pct, trailing_pct, {
+                "enabled": False,
+                "stop_mult": 1.0,
+                "take_profit_mult": 1.0,
+            }
+
+        atr_pct = safe_float(row.get("atr_pct")) or 0.0
+        ai_confidence = safe_float(row.get("ai_confidence")) or 0.0
+        regime = str(row.get("market_regime") or "SIDEWAYS").upper()
+        target_atr = max(0.05, self.settings.auto_trade_target_atr_pct)
+        min_mult = self.settings.auto_trade_dynamic_exit_min_mult
+        max_mult = self.settings.auto_trade_dynamic_exit_max_mult
+
+        volatility_mult = self._clamp(atr_pct / target_atr if atr_pct > 0 else 1.0, min_mult, max_mult)
+        stop_mult = volatility_mult
+        take_profit_mult = self._clamp(0.85 + (volatility_mult * 0.25), min_mult, max_mult)
+
+        trend_aligned = (
+            (side == "LONG" and regime == "BULL")
+            or (side == "SHORT" and regime == "BEAR")
+        )
+        trend_opposed = (
+            (side == "LONG" and regime == "BEAR")
+            or (side == "SHORT" and regime == "BULL")
+        )
+        if trend_aligned:
+            take_profit_mult *= 1.15
+            stop_mult *= 1.05
+        elif trend_opposed:
+            take_profit_mult *= 0.85
+            stop_mult *= 0.8
+        elif regime in {"CHOP", "SIDEWAYS"}:
+            take_profit_mult *= 0.82
+            stop_mult *= 0.9
+        elif regime == "HIGH_VOL":
+            stop_mult *= 1.2
+            take_profit_mult *= 1.05
+
+        if ai_confidence >= 75:
+            take_profit_mult *= 1.08
+        elif ai_confidence < 50:
+            take_profit_mult *= 0.9
+            stop_mult *= 0.9
+
+        self_learning = self.state.auto_trade_self_learning or {}
+        stop_mult *= float(safe_float(self_learning.get("stop_mult")) or 1.0)
+        take_profit_mult *= float(safe_float(self_learning.get("take_profit_mult")) or 1.0)
+
+        stop_mult = self._clamp(stop_mult, min_mult, max_mult)
+        take_profit_mult = self._clamp(take_profit_mult, min_mult, max_mult)
+        trailing_mult = self._clamp((stop_mult + take_profit_mult) / 2.0, min_mult, max_mult)
+
+        return (
+            max(0.1, stop_loss_pct * stop_mult),
+            max(0.1, take_profit_pct * take_profit_mult),
+            max(0.0, trailing_pct * trailing_mult),
+            {
+                "enabled": True,
+                "regime": regime,
+                "stop_mult": round(stop_mult, 4),
+                "take_profit_mult": round(take_profit_mult, 4),
+                "trailing_mult": round(trailing_mult, 4),
+            },
+        )
+
     def get_position_exit_reason(
         self,
         row: dict[str, Any],
@@ -1421,10 +2201,12 @@ class TradingService:
 
         position_side = self._normalize_side(position.get("side"))
         active_profile_name = self._normalize_profile_name(self.state.auto_trade_adaptive_profile)
-        stop_loss_pct, take_profit_pct, trailing_pct = self._side_stop_take_trail(
+        stop_loss_pct, take_profit_pct, trailing_pct, exit_meta = self._dynamic_exit_profile(
+            row,
             position_side,
             active_profile_name,
         )
+        position["dynamic_exit"] = exit_meta
 
         if position_side == "SHORT":
             pnl_pct = ((entry_price - current_price) / entry_price) * 100
@@ -1488,6 +2270,20 @@ class TradingService:
                     and pnl_pct <= self.settings.auto_trade_time_stop_min_pnl_pct
                 ):
                     return "TIME STOP", pnl_pct
+
+        if self.settings.auto_trade_extreme_volatility_exit_enabled:
+            atr_pct = safe_float(row.get("atr_pct"))
+            change_24h = safe_float(row.get("change_24h"))
+            if (
+                atr_pct is not None
+                and atr_pct >= self.settings.auto_trade_extreme_volatility_exit_atr_pct
+            ):
+                return "EXTREME VOLATILITY EXIT", pnl_pct
+            if (
+                change_24h is not None
+                and abs(change_24h) >= self.settings.auto_trade_extreme_volatility_exit_change_pct
+            ):
+                return "EXTREME VOLATILITY EXIT", pnl_pct
 
         signal = str(row.get("signal") or "HOLD").upper()
         strength = str(row.get("strength") or "HOLD").upper()
@@ -1730,9 +2526,11 @@ class TradingService:
         self,
         available_usdt: float | None,
         row: dict[str, Any],
+        side: str = "LONG",
         risk_multiplier: float = 1.0,
     ) -> float:
         notional_usdt = self.settings.trade_size_usdt
+        sizing_meta: dict[str, Any] = {}
 
         if (
             self.settings.trade_size_percent > 0
@@ -1741,10 +2539,40 @@ class TradingService:
         ):
             notional_usdt = available_usdt * (self.settings.trade_size_percent / 100)
 
-        notional_usdt *= self._volatility_size_multiplier(row)
+        kelly_fraction_pct, kelly_meta = self._kelly_sizing_fraction_pct(row)
+        sizing_meta["kelly"] = kelly_meta
+        if (
+            kelly_fraction_pct is not None
+            and available_usdt is not None
+            and available_usdt > 0
+            and kelly_fraction_pct > 0
+        ):
+            notional_usdt = available_usdt * (kelly_fraction_pct / 100.0)
+
+        base_before_adjustments = notional_usdt
+        volatility_mult = self._volatility_size_multiplier(row)
+        confidence_mult, confidence_meta = self._confidence_sizing_multiplier(row)
+        regime_mult, regime_meta = self._regime_sizing_multiplier(row, side)
+        compounding_mult, compounding_meta = self._compounding_multiplier()
+        notional_usdt *= volatility_mult
         notional_usdt *= max(0.05, risk_multiplier)
+        notional_usdt *= max(0.05, confidence_mult)
+        notional_usdt *= max(0.05, regime_mult)
+        notional_usdt *= max(0.05, compounding_mult)
         notional_usdt = max(notional_usdt, self.settings.trade_size_usdt_min)
         notional_usdt = min(notional_usdt, self.settings.trade_size_usdt_max)
+        sizing_meta.update(
+            {
+                "base_notional_usdt": round(base_before_adjustments, 4),
+                "volatility_mult": round(volatility_mult, 4),
+                "risk_mult": round(max(0.05, risk_multiplier), 4),
+                "confidence": confidence_meta,
+                "regime": regime_meta,
+                "compounding": compounding_meta,
+                "final_notional_usdt": round(notional_usdt, 4),
+            }
+        )
+        row["_risk_sizing"] = sizing_meta
         return notional_usdt
 
     def get_symbol_min_notional_usdt(self, symbol: str) -> float:
@@ -1798,16 +2626,23 @@ class TradingService:
             if self.state.auto_trade_halt_day and self.state.auto_trade_halt_day != day_key:
                 self.state.auto_trade_halt_day = None
             self._clear_disabled_forward_guardrail_halt_locked()
+            self._update_price_history(market_rows)
 
             self._maybe_send_daily_recap(now, day_key)
 
             rows_by_symbol = {
                 str(row.get("symbol")): row for row in market_rows if row.get("symbol")
             }
+            performance_snapshot = build_performance_analytics(
+                list(self.state.auto_trade_journal),
+                self._daily_pnl_history_locked(limit_days=self._daily_pnl_history_days),
+            )
+            self_learning = self._derive_self_learning_adjustment(performance_snapshot)
             adaptive_profile = self._derive_auto_adapt_profile(market_rows)
             forward_risk_multiplier, forward_reason = self._compute_forward_guardrail(now)
             effective_risk_multiplier = (
                 forward_risk_multiplier * float(adaptive_profile["risk_mult"])
+                * float(self_learning.get("risk_mult") or 1.0)
             )
             self.state.auto_trade_last_risk_multiplier = effective_risk_multiplier
 
@@ -1857,6 +2692,17 @@ class TradingService:
                         close_ratio = self._clamp(realized_amount / amount, 0.0, 1.0)
                         closed_notional = notional_before_close * close_ratio
                         self.state.auto_trade_daily_pnl[day_key] += realized_pnl
+                        update_advanced_model_stats(
+                            self.state,
+                            position.get("advanced_ai"),
+                            position_side=position_side,
+                            pnl_usdt=realized_pnl,
+                        )
+                        self._update_lstm_learning(
+                            symbol=symbol,
+                            side=position_side,
+                            pnl_pct=realized_pnl_pct,
+                        )
                         self._paper_wallet_on_close(
                             position=position,
                             closed_amount=realized_amount,
@@ -1888,6 +2734,7 @@ class TradingService:
                                     max(0.0, notional_before_close - closed_notional),
                                     4,
                                 ),
+                                "advanced_ai": position.get("advanced_ai"),
                             },
                         )
                         self._copy_trade_on_exit(
@@ -1993,16 +2840,29 @@ class TradingService:
                 self.state.auto_trade_positions.pop(symbol, None)
                 status_reason = f"{symbol}: {position_side} closed ({reason})"
                 self._update_symbol_stats(symbol, pnl_usdt)
+                update_advanced_model_stats(
+                    self.state,
+                    position.get("advanced_ai"),
+                    position_side=position_side,
+                    pnl_usdt=pnl_usdt,
+                )
+                exit_pnl_pct = self._pnl_pct(entry_price, exit_price, position_side)
+                self._update_lstm_learning(
+                    symbol=symbol,
+                    side=position_side,
+                    pnl_pct=exit_pnl_pct,
+                )
                 self._record_journal(
                     symbol=symbol,
                     event_type="EXIT",
                     side=position_side,
                     reason=reason,
                     pnl_usdt=pnl_usdt,
-                    pnl_pct=self._pnl_pct(entry_price, exit_price, position_side),
+                    pnl_pct=exit_pnl_pct,
                     notional_usdt=closed_notional,
                     price=exit_price,
                     amount=filled_amount,
+                    metadata={"advanced_ai": position.get("advanced_ai")},
                 )
                 self._copy_trade_on_exit(
                     symbol=symbol,
@@ -2084,8 +2944,59 @@ class TradingService:
                     f"{status_reason} • auto-convert {converted_assets} asset(s) to USDT"
                 )
 
+            previous_halt_reason = self.state.auto_trade_halt_reason
+            drawdown_halted, drawdown_reason = self._update_drawdown_guard(
+                wallet_payload,
+                now_ts=now,
+                day_key=day_key,
+            )
+            if drawdown_halted and previous_halt_reason != drawdown_reason:
+                self.alerts.emit_alert(
+                    symbol=self.settings.default_symbol,
+                    alert_type="auto_trade_drawdown_halt",
+                    title="Auto-trade paused by max drawdown",
+                    message=drawdown_reason,
+                    severity="high",
+                    meta={
+                        "event": "DRAWDOWN_HALT",
+                        "drawdown_pct": round(self.state.auto_trade_current_drawdown_pct, 4),
+                        "max_drawdown_pct": round(self.state.auto_trade_max_drawdown_pct, 4),
+                    },
+                )
+
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
-            risk_halted = daily_pnl <= -self.settings.max_daily_loss_usdt
+            profit_mult, profit_reason, profit_halted = self._profit_lock_multiplier(
+                day_key=day_key,
+                daily_pnl=daily_pnl,
+                now_ts=now,
+            )
+            if profit_mult != 1.0:
+                effective_risk_multiplier *= profit_mult
+                self.state.auto_trade_last_risk_multiplier = effective_risk_multiplier
+            if profit_halted:
+                if previous_halt_reason != profit_reason:
+                    self.alerts.emit_alert(
+                        symbol=self.settings.default_symbol,
+                        alert_type="auto_trade_profit_lock",
+                        title="Auto-trade paused by profit lock",
+                        message=profit_reason,
+                        severity="medium",
+                        meta={
+                            "event": "PROFIT_LOCK",
+                            "pnl_usdt": daily_pnl,
+                            "peak_pnl_usdt": self.state.auto_trade_daily_peak_pnl_usdt,
+                        },
+                    )
+                self.state.auto_trade_last_reason = profit_reason
+                return
+
+            daily_loss_limit_usdt, daily_loss_basis = self._daily_loss_limit_details(
+                wallet_payload,
+            )
+            risk_halted = (
+                daily_loss_limit_usdt > 0
+                and daily_pnl <= -daily_loss_limit_usdt
+            )
 
             if risk_halted:
                 if self.state.auto_trade_halt_day != day_key:
@@ -2099,18 +3010,20 @@ class TradingService:
                         title="Auto-trade halted by daily risk limit",
                         message=(
                             f"Daily PnL reached {daily_pnl:.2f} USDT "
-                            f"(limit -{self.settings.max_daily_loss_usdt:.2f})"
+                            f"(limit -{daily_loss_limit_usdt:.2f}, {daily_loss_basis})"
                         ),
                         severity="high",
                         meta={
                             "event": "HALT",
                             "pnl_usdt": daily_pnl,
+                            "limit_usdt": daily_loss_limit_usdt,
+                            "basis": daily_loss_basis,
                             "reason": "Daily risk limit hit",
                         },
                     )
                 self.state.auto_trade_last_reason = (
                     f"Risk halt active: daily PnL {daily_pnl:.2f} USDT "
-                    f"(limit -{self.settings.max_daily_loss_usdt:.2f})"
+                    f"(limit -{daily_loss_limit_usdt:.2f}, {daily_loss_basis})"
                 )
                 return
 
@@ -2127,6 +3040,24 @@ class TradingService:
                     self.state.auto_trade_last_reason = (
                         f"Risk halt ({max(0, remaining)}s): {halt_reason}"
                     )
+                return
+
+            circuit_halted, circuit_reason = self._circuit_breaker_check(
+                market_rows,
+                now_ts=now,
+                day_key=day_key,
+            )
+            if circuit_halted:
+                if previous_halt_reason != circuit_reason:
+                    self.alerts.emit_alert(
+                        symbol=self.settings.default_symbol,
+                        alert_type="auto_trade_circuit_breaker",
+                        title="Auto-trade circuit breaker activated",
+                        message=circuit_reason,
+                        severity="high",
+                        meta={"event": "CIRCUIT_BREAKER"},
+                    )
+                self.state.auto_trade_last_reason = circuit_reason
                 return
 
             if not self._session_allows_entry(now):
@@ -2198,10 +3129,37 @@ class TradingService:
                     status_reason = f"{symbol}: execution cost gate ({cost_reason})"
                     continue
 
+                quality_ok, quality_reason, quality_meta = self._quality_gate_allows(
+                    row,
+                    entry_side,
+                    adaptive_profile_name,
+                )
+                if not quality_ok:
+                    status_reason = f"{symbol}: quality gate blocked ({quality_reason})"
+                    continue
+
+                correlation_limit_ok, correlation_limit_reason = (
+                    self._correlation_position_limit_allows(row, entry_side)
+                )
+                if not correlation_limit_ok:
+                    status_reason = f"{symbol}: correlation limit ({correlation_limit_reason})"
+                    continue
+
+                correlation_risk_mult, correlation_reason = self._correlation_risk_multiplier(
+                    row,
+                    entry_side,
+                )
                 ai_ok, ai_reason = self._ai_filter_allows(
                     row,
                     entry_side,
-                    min_confidence_override=int(adaptive_profile["ai_min_confidence"]),
+                    min_confidence_override=max(
+                        0,
+                        min(
+                            100,
+                            int(adaptive_profile["ai_min_confidence"])
+                            + int(self_learning.get("ai_conf_delta") or 0),
+                        ),
+                    ),
                 )
                 if not ai_ok:
                     status_reason = f"{symbol}: AI filter blocked ({ai_reason})"
@@ -2220,6 +3178,9 @@ class TradingService:
                         "row": row,
                         "entry_side": entry_side,
                         "reason_text": reason_text,
+                        "quality_meta": quality_meta,
+                        "correlation_risk_mult": correlation_risk_mult,
+                        "correlation_reason": correlation_reason,
                         "rank_score": self._entry_rank_score(
                             row,
                             entry_side,
@@ -2242,6 +3203,13 @@ class TradingService:
                 row = candidate.get("row") if isinstance(candidate.get("row"), dict) else {}
                 entry_side = str(candidate.get("entry_side") or "LONG")
                 reason_text = str(candidate.get("reason_text") or "")
+                quality_meta = (
+                    candidate.get("quality_meta")
+                    if isinstance(candidate.get("quality_meta"), dict)
+                    else {}
+                )
+                correlation_risk_mult = float(candidate.get("correlation_risk_mult") or 1.0)
+                correlation_reason = str(candidate.get("correlation_reason") or "")
                 rank_score = float(candidate.get("rank_score") or 0.0)
 
                 if not symbol or not isinstance(row, dict):
@@ -2269,7 +3237,8 @@ class TradingService:
                 notional_usdt = self._base_notional_usdt(
                     available_usdt,
                     row,
-                    risk_multiplier=effective_risk_multiplier,
+                    side=entry_side,
+                    risk_multiplier=effective_risk_multiplier * correlation_risk_mult,
                 )
 
                 min_notional_usdt = self.get_symbol_min_notional_usdt(symbol)
@@ -2364,6 +3333,14 @@ class TradingService:
                     "lowest_price": entry_price,
                     "partial_tp_done": False,
                     "break_even_armed": False,
+                    "advanced_ai": row.get("advanced_ai"),
+                    "sentiment_score": row.get("sentiment_score"),
+                    "microstructure_pressure": row.get("microstructure_pressure"),
+                    "market_regime": row.get("market_regime"),
+                    "entry_quality": quality_meta or row.get("entry_quality"),
+                    "entry_score": row.get("entry_score"),
+                    "entry_probability": row.get("entry_probability"),
+                    "risk_sizing": row.get("_risk_sizing"),
                 }
                 self._copy_trade_on_entry(
                     symbol=symbol,
@@ -2382,10 +3359,14 @@ class TradingService:
                     available_usdt = max(0.0, available_usdt - notional_usdt)
                 status_reason = (
                     f"{symbol}: {entry_side} opened at {entry_price:.6f} • "
+                    f"score {safe_float(row.get('entry_score')) or 0:.1f} • "
+                    f"prob {safe_float(row.get('entry_probability')) or 0:.1f}% • "
                     f"rank {rank_score:.1f} • profile {adaptive_profile['name']}"
                 )
                 if forward_reason:
                     status_reason = f"{status_reason} • {forward_reason}"
+                if correlation_reason:
+                    status_reason = f"{status_reason} • {correlation_reason}"
 
                 self.push_auto_trade_event(
                     symbol,
@@ -2394,6 +3375,7 @@ class TradingService:
                     (
                         f"Rule {entry_side} passed • RSI {row.get('rsi')} • "
                         f"AI {row.get('ai_bias')} ({row.get('ai_confidence')}%)"
+                        f" • Q {row.get('quantum_action') or '-'}"
                     ),
                     price=entry_price,
                     amount=filled_amount,
@@ -2430,9 +3412,20 @@ class TradingService:
                         "spread_pct": row.get("spread_pct"),
                         "volume_ratio": row.get("volume_ratio"),
                         "rank_score": rank_score,
+                        "entry_quality": quality_meta or row.get("entry_quality"),
+                        "entry_score": row.get("entry_score"),
+                        "entry_probability": row.get("entry_probability"),
+                        "entry_risk_reward": row.get("entry_risk_reward"),
                         "guardrail_mult": round(forward_risk_multiplier, 4),
+                        "correlation_mult": round(correlation_risk_mult, 4),
+                        "correlation_reason": correlation_reason,
+                        "risk_sizing": row.get("_risk_sizing"),
                         "adaptive_profile": adaptive_profile["name"],
                         "adaptive_mult": round(float(adaptive_profile["risk_mult"]), 4),
+                        "self_learning": dict(self_learning),
+                        "advanced_ai": row.get("advanced_ai"),
+                        "sentiment_score": row.get("sentiment_score"),
+                        "microstructure_pressure": row.get("microstructure_pressure"),
                     },
                 )
 
@@ -2483,12 +3476,42 @@ class TradingService:
                     halt_type = "forward_guardrail"
                 elif str(self.state.auto_trade_halt_reason or "").lower().startswith("consecutive losses"):
                     halt_type = "loss_streak"
+                elif "drawdown" in str(self.state.auto_trade_halt_reason or "").lower():
+                    halt_type = "drawdown"
+                elif "profit lock" in str(self.state.auto_trade_halt_reason or "").lower():
+                    halt_type = "profit_lock"
+                elif "circuit breaker" in str(self.state.auto_trade_halt_reason or "").lower():
+                    halt_type = "circuit_breaker"
                 else:
                     halt_type = "risk_pause"
             halt_remaining_seconds = (
                 max(0, int(self.state.auto_trade_halt_until - now))
                 if self.state.auto_trade_halt_until > now
                 else 0
+            )
+            model_stats_raw = ensure_model_stats(self.state)
+            advanced_model_stats = {}
+            for name, stats in model_stats_raw.items():
+                predictions = int(safe_float(stats.get("predictions")) or 0)
+                correct = int(safe_float(stats.get("correct")) or 0)
+                advanced_model_stats[name] = {
+                    "predictions": predictions,
+                    "correct": correct,
+                    "wrong": int(safe_float(stats.get("wrong")) or 0),
+                    "win_rate": round(correct / predictions, 4) if predictions > 0 else 0.0,
+                    "pnl_usdt": round(float(safe_float(stats.get("pnl_usdt")) or 0.0), 4),
+                    "weight": round(float(safe_float(stats.get("weight")) or 0.0), 4),
+                }
+            performance = build_performance_analytics(
+                list(self.state.auto_trade_journal),
+                daily_pnl_history,
+            )
+            advanced_cv = build_time_series_cv_report(list(self.state.auto_trade_journal))
+            daily_loss_limit_usdt, daily_loss_limit_basis = self._daily_loss_limit_details(None)
+            lstm_updates = sum(
+                int(safe_float(values.get("updates")) or 0)
+                for values in self.state.auto_trade_lstm_state.values()
+                if isinstance(values, dict)
             )
 
             return {
@@ -2503,6 +3526,58 @@ class TradingService:
                 "risk_multiplier": round(self.state.auto_trade_last_risk_multiplier, 4),
                 "guardrail_active": self.state.auto_trade_guardrail_active,
                 "guardrail_reason": self.state.auto_trade_guardrail_reason,
+                "kelly_enabled": self.settings.auto_trade_kelly_enabled,
+                "kelly_fraction": round(self.settings.auto_trade_kelly_fraction, 4),
+                "kelly_max_fraction_pct": round(self.settings.auto_trade_kelly_max_fraction_pct, 4),
+                "kelly_min_trades": self.settings.auto_trade_kelly_min_trades,
+                "correlation_risk_enabled": self.settings.auto_trade_correlation_risk_enabled,
+                "max_correlation": round(self.settings.auto_trade_max_correlation, 4),
+                "correlation_risk_mult": round(self.settings.auto_trade_correlation_risk_mult, 4),
+                "max_correlated_positions": self.settings.auto_trade_max_correlated_positions,
+                "max_drawdown_enabled": self.settings.auto_trade_max_drawdown_enabled,
+                "max_drawdown_limit_pct": round(self.settings.auto_trade_max_drawdown_pct, 4),
+                "peak_equity_usdt": round(self.state.auto_trade_peak_equity_usdt, 4),
+                "current_drawdown_pct": round(self.state.auto_trade_current_drawdown_pct, 4),
+                "max_drawdown_pct": round(self.state.auto_trade_max_drawdown_pct, 4),
+                "dynamic_exit_enabled": self.settings.auto_trade_dynamic_exit_enabled,
+                "extreme_volatility_exit_enabled": (
+                    self.settings.auto_trade_extreme_volatility_exit_enabled
+                ),
+                "extreme_volatility_exit_atr_pct": round(
+                    self.settings.auto_trade_extreme_volatility_exit_atr_pct,
+                    4,
+                ),
+                "extreme_volatility_exit_change_pct": round(
+                    self.settings.auto_trade_extreme_volatility_exit_change_pct,
+                    4,
+                ),
+                "profit_lock_enabled": self.settings.auto_trade_profit_lock_enabled,
+                "profit_lock_active": self.state.auto_trade_profit_lock_active,
+                "profit_lock_reason": self.state.auto_trade_profit_lock_reason,
+                "profit_lock_trigger_usdt": round(
+                    self.settings.auto_trade_profit_lock_trigger_usdt,
+                    4,
+                ),
+                "profit_lock_giveback_pct": round(
+                    self.settings.auto_trade_profit_lock_giveback_pct,
+                    4,
+                ),
+                "daily_peak_pnl_usdt": round(self.state.auto_trade_daily_peak_pnl_usdt, 4),
+                "entry_quality_enabled": self.settings.auto_trade_entry_quality_enabled,
+                "min_entry_score": self.settings.auto_trade_min_entry_score,
+                "min_entry_probability": self.settings.auto_trade_min_entry_probability,
+                "min_risk_reward": round(self.settings.auto_trade_min_risk_reward, 4),
+                "min_liquidity_score": round(self.settings.auto_trade_min_liquidity_score, 4),
+                "circuit_breaker_enabled": self.settings.auto_trade_circuit_breaker_enabled,
+                "circuit_breaker_volatility_symbols": (
+                    self.settings.auto_trade_circuit_breaker_volatility_symbols
+                ),
+                "self_learning": dict(self.state.auto_trade_self_learning),
+                "lstm_learning_enabled": self.settings.auto_trade_lstm_learning_enabled,
+                "lstm_state_count": len(self.state.auto_trade_lstm_state),
+                "lstm_update_count": lstm_updates,
+                "performance": performance,
+                "market_regime": dict(self.state.market_regime_summary),
                 "min_notional_usdt": round(self.settings.auto_trade_min_notional_usdt, 4),
                 "min_buffer_pct": round(self.settings.auto_trade_min_buffer_pct, 4),
                 "strategy_mode": self.settings.auto_trade_strategy_mode,
@@ -2526,6 +3601,12 @@ class TradingService:
                 "ai_filter_enabled": self.settings.ai_filter_enabled,
                 "ai_filter_min_confidence": self.settings.ai_filter_min_confidence,
                 "ai_filter_min_score_abs": round(self.settings.ai_filter_min_score_abs, 2),
+                "advanced_ai_enabled": self.settings.advanced_ai_enabled,
+                "advanced_ai_quantum_enabled": self.settings.advanced_ai_quantum_enabled,
+                "advanced_ai_model_stats": advanced_model_stats,
+                "advanced_ai_cv": advanced_cv,
+                "sentiment_enabled": self.settings.sentiment_enabled,
+                "sentiment_lookback_minutes": self.settings.sentiment_lookback_minutes,
                 "entry_confirm_ema_stack": self.settings.auto_trade_entry_confirm_ema_stack,
                 "entry_confirm_macd": self.settings.auto_trade_entry_confirm_macd,
                 "entry_require_macd_data": self.settings.auto_trade_entry_require_macd_data,
@@ -2568,6 +3649,14 @@ class TradingService:
                 "adaptive_profile": adaptive_profile_name,
                 "adaptive_reason": self.state.auto_trade_adaptive_reason,
                 "adaptive_ai_min_confidence": self.state.auto_trade_adaptive_ai_min_confidence,
+                "effective_ai_min_confidence": max(
+                    0,
+                    min(
+                        100,
+                        int(self.state.auto_trade_adaptive_ai_min_confidence)
+                        + int((self.state.auto_trade_self_learning or {}).get("ai_conf_delta") or 0),
+                    ),
+                ),
                 "adaptive_risk_multiplier": round(
                     self.state.auto_trade_adaptive_risk_multiplier,
                     4,
@@ -2595,13 +3684,17 @@ class TradingService:
                 "daily_pnl_usdt": round(daily_pnl, 4),
                 "daily_pnl_30d_usdt": round(daily_pnl_30d, 4),
                 "daily_pnl_history_days": self._daily_pnl_history_days,
-                "daily_loss_limit_usdt": round(self.settings.max_daily_loss_usdt, 4),
+                "daily_loss_absolute_usdt": round(self.settings.max_daily_loss_usdt, 4),
+                "daily_loss_limit_usdt": round(daily_loss_limit_usdt, 4),
+                "daily_loss_limit_basis": daily_loss_limit_basis,
+                "max_daily_loss_pct": round(self.settings.auto_trade_max_daily_loss_pct, 4),
                 "halted": halt_type is not None,
                 "halt_type": halt_type,
                 "halt_until": int(self.state.auto_trade_halt_until),
                 "halt_remaining_seconds": halt_remaining_seconds,
                 "halt_reason": self.state.auto_trade_halt_reason,
                 "consecutive_losses": self.state.auto_trade_consecutive_losses,
+                "consecutive_wins": self.state.auto_trade_consecutive_wins,
                 "forward_guardrail_halt_enabled": (
                     self.settings.auto_trade_forward_guardrail_halt_enabled
                 ),

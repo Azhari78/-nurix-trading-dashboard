@@ -63,7 +63,7 @@ DEFAULT_SYMBOLS = [
     "FLOW/USDT",
     "SEI/USDT",
 ]
-ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h"}
+ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
 FALLBACK_DEFAULT_TIMEFRAME = "1m"
 ALLOWED_AUTO_TRADE_MODES = {"long_only", "short_only", "both"}
 FALLBACK_AUTO_TRADE_MODE = "long_only"
@@ -239,6 +239,45 @@ class Settings:
     auto_trade_target_atr_pct: float
     auto_trade_volatility_size_min_mult: float
     auto_trade_volatility_size_max_mult: float
+    auto_trade_kelly_enabled: bool
+    auto_trade_kelly_fraction: float
+    auto_trade_kelly_max_fraction_pct: float
+    auto_trade_kelly_min_trades: int
+    auto_trade_correlation_risk_enabled: bool
+    auto_trade_max_correlation: float
+    auto_trade_correlation_lookback: int
+    auto_trade_correlation_risk_mult: float
+    auto_trade_max_drawdown_enabled: bool
+    auto_trade_max_drawdown_pct: float
+    auto_trade_dynamic_exit_enabled: bool
+    auto_trade_dynamic_exit_min_mult: float
+    auto_trade_dynamic_exit_max_mult: float
+    auto_trade_extreme_volatility_exit_enabled: bool
+    auto_trade_extreme_volatility_exit_atr_pct: float
+    auto_trade_extreme_volatility_exit_change_pct: float
+    auto_trade_profit_lock_enabled: bool
+    auto_trade_profit_lock_trigger_usdt: float
+    auto_trade_profit_lock_giveback_pct: float
+    auto_trade_profit_lock_pause_seconds: int
+    auto_trade_profit_lock_risk_mult: float
+    auto_trade_confidence_sizing_enabled: bool
+    auto_trade_confidence_size_min_mult: float
+    auto_trade_confidence_size_max_mult: float
+    auto_trade_regime_sizing_enabled: bool
+    auto_trade_regime_risk_on_mult: float
+    auto_trade_regime_risk_off_mult: float
+    auto_trade_compounding_enabled: bool
+    auto_trade_compounding_profit_step_usdt: float
+    auto_trade_compounding_max_mult: float
+    auto_trade_entry_quality_enabled: bool
+    auto_trade_min_entry_score: int
+    auto_trade_min_entry_probability: int
+    auto_trade_min_risk_reward: float
+    auto_trade_min_liquidity_score: float
+    auto_trade_max_correlated_positions: int
+    auto_trade_circuit_breaker_enabled: bool
+    auto_trade_circuit_breaker_volatility_symbols: int
+    auto_trade_max_daily_loss_pct: float
     long_rsi_min: float
     long_rsi_max: float
     short_rsi_min: float
@@ -299,6 +338,18 @@ class Settings:
     ai_filter_enabled: bool
     ai_filter_min_confidence: int
     ai_filter_min_score_abs: float
+    advanced_ai_enabled: bool
+    advanced_ai_quantum_enabled: bool
+    sentiment_enabled: bool
+    sentiment_lookback_minutes: int
+    market_regime_enabled: bool
+    market_regime_clusters: int
+    auto_trade_self_learning_enabled: bool
+    auto_trade_self_learning_min_trades: int
+    auto_trade_self_learning_risk_min_mult: float
+    auto_trade_self_learning_risk_max_mult: float
+    auto_trade_lstm_learning_enabled: bool
+    auto_trade_lstm_learning_rate: float
     auto_trade_auto_adapt_enabled: bool
     auto_trade_auto_adapt_low_atr_pct: float
     auto_trade_auto_adapt_high_atr_pct: float
@@ -477,6 +528,159 @@ def load_settings() -> Settings:
     auto_trade_volatility_size_max_mult = max(
         parse_env_float(os.getenv("AUTO_TRADE_VOLATILITY_SIZE_MAX_MULT"), 1.65),
         auto_trade_volatility_size_min_mult,
+    )
+    auto_trade_kelly_enabled = parse_env_bool(os.getenv("AUTO_TRADE_KELLY_ENABLED"), True)
+    auto_trade_kelly_fraction = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_KELLY_FRACTION"), 0.25), 0.01),
+        1.0,
+    )
+    auto_trade_kelly_max_fraction_pct = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_KELLY_MAX_FRACTION_PCT"), 4.0), 0.1),
+        25.0,
+    )
+    auto_trade_kelly_min_trades = max(
+        parse_env_int(os.getenv("AUTO_TRADE_KELLY_MIN_TRADES"), 12),
+        3,
+    )
+    auto_trade_correlation_risk_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_CORRELATION_RISK_ENABLED"),
+        True,
+    )
+    auto_trade_max_correlation = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_MAX_CORRELATION"), 0.82), 0.1),
+        0.99,
+    )
+    auto_trade_correlation_lookback = max(
+        parse_env_int(os.getenv("AUTO_TRADE_CORRELATION_LOOKBACK"), 60),
+        10,
+    )
+    auto_trade_correlation_risk_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_CORRELATION_RISK_MULT"), 0.55), 0.05),
+        1.0,
+    )
+    auto_trade_max_drawdown_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_MAX_DRAWDOWN_ENABLED"),
+        True,
+    )
+    auto_trade_max_drawdown_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MAX_DRAWDOWN_PCT"), 15.0),
+        0.5,
+    )
+    auto_trade_dynamic_exit_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_DYNAMIC_EXIT_ENABLED"),
+        True,
+    )
+    auto_trade_dynamic_exit_min_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_DYNAMIC_EXIT_MIN_MULT"), 0.65),
+        0.1,
+    )
+    auto_trade_dynamic_exit_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_DYNAMIC_EXIT_MAX_MULT"), 1.75),
+        auto_trade_dynamic_exit_min_mult,
+    )
+    auto_trade_extreme_volatility_exit_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_EXTREME_VOLATILITY_EXIT_ENABLED"),
+        True,
+    )
+    auto_trade_extreme_volatility_exit_atr_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_EXTREME_VOLATILITY_EXIT_ATR_PCT"), 7.5),
+        0.1,
+    )
+    auto_trade_extreme_volatility_exit_change_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_EXTREME_VOLATILITY_EXIT_CHANGE_PCT"), 24.0),
+        0.1,
+    )
+    auto_trade_profit_lock_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_PROFIT_LOCK_ENABLED"),
+        True,
+    )
+    auto_trade_profit_lock_trigger_usdt = max(
+        parse_env_float(os.getenv("AUTO_TRADE_PROFIT_LOCK_TRIGGER_USDT"), 8.0),
+        0.0,
+    )
+    auto_trade_profit_lock_giveback_pct = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_PROFIT_LOCK_GIVEBACK_PCT"), 35.0), 1.0),
+        95.0,
+    )
+    auto_trade_profit_lock_pause_seconds = max(
+        parse_env_int(os.getenv("AUTO_TRADE_PROFIT_LOCK_PAUSE_SECONDS"), 1800),
+        30,
+    )
+    auto_trade_profit_lock_risk_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_PROFIT_LOCK_RISK_MULT"), 0.55), 0.05),
+        1.0,
+    )
+    auto_trade_confidence_sizing_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_CONFIDENCE_SIZING_ENABLED"),
+        True,
+    )
+    auto_trade_confidence_size_min_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_CONFIDENCE_SIZE_MIN_MULT"), 0.55),
+        0.05,
+    )
+    auto_trade_confidence_size_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_CONFIDENCE_SIZE_MAX_MULT"), 1.35),
+        auto_trade_confidence_size_min_mult,
+    )
+    auto_trade_regime_sizing_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_REGIME_SIZING_ENABLED"),
+        True,
+    )
+    auto_trade_regime_risk_on_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_REGIME_RISK_ON_MULT"), 1.1),
+        0.1,
+    )
+    auto_trade_regime_risk_off_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_REGIME_RISK_OFF_MULT"), 0.65), 0.05),
+        1.0,
+    )
+    auto_trade_compounding_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_COMPOUNDING_ENABLED"),
+        True,
+    )
+    auto_trade_compounding_profit_step_usdt = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COMPOUNDING_PROFIT_STEP_USDT"), 20.0),
+        0.01,
+    )
+    auto_trade_compounding_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COMPOUNDING_MAX_MULT"), 1.35),
+        1.0,
+    )
+    auto_trade_entry_quality_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_ENTRY_QUALITY_ENABLED"),
+        True,
+    )
+    auto_trade_min_entry_score = min(
+        max(parse_env_int(os.getenv("AUTO_TRADE_MIN_ENTRY_SCORE"), 70), 0),
+        100,
+    )
+    auto_trade_min_entry_probability = min(
+        max(parse_env_int(os.getenv("AUTO_TRADE_MIN_ENTRY_PROBABILITY"), 75), 0),
+        100,
+    )
+    auto_trade_min_risk_reward = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MIN_RISK_REWARD"), 2.0),
+        0.1,
+    )
+    auto_trade_min_liquidity_score = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MIN_LIQUIDITY_SCORE"), 1.0),
+        0.0,
+    )
+    auto_trade_max_correlated_positions = max(
+        parse_env_int(os.getenv("AUTO_TRADE_MAX_CORRELATED_POSITIONS"), 3),
+        1,
+    )
+    auto_trade_circuit_breaker_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_CIRCUIT_BREAKER_ENABLED"),
+        True,
+    )
+    auto_trade_circuit_breaker_volatility_symbols = max(
+        parse_env_int(os.getenv("AUTO_TRADE_CIRCUIT_BREAKER_VOLATILITY_SYMBOLS"), 3),
+        1,
+    )
+    auto_trade_max_daily_loss_pct = max(
+        parse_env_float(os.getenv("AUTO_TRADE_MAX_DAILY_LOSS_PCT"), 3.0),
+        0.1,
     )
 
     auto_trade_entry_confirm_ema_stack = parse_env_bool(
@@ -662,6 +866,35 @@ def load_settings() -> Settings:
         os.getenv("AUTO_TRADE_FORWARD_GUARDRAIL_HALT_ENABLED"),
         False,
     )
+    market_regime_enabled = parse_env_bool(os.getenv("MARKET_REGIME_ENABLED"), True)
+    market_regime_clusters = max(
+        parse_env_int(os.getenv("MARKET_REGIME_CLUSTERS"), 3),
+        2,
+    )
+    auto_trade_self_learning_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_SELF_LEARNING_ENABLED"),
+        True,
+    )
+    auto_trade_self_learning_min_trades = max(
+        parse_env_int(os.getenv("AUTO_TRADE_SELF_LEARNING_MIN_TRADES"), 10),
+        3,
+    )
+    auto_trade_self_learning_risk_min_mult = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_SELF_LEARNING_RISK_MIN_MULT"), 0.55), 0.05),
+        1.0,
+    )
+    auto_trade_self_learning_risk_max_mult = max(
+        parse_env_float(os.getenv("AUTO_TRADE_SELF_LEARNING_RISK_MAX_MULT"), 1.2),
+        auto_trade_self_learning_risk_min_mult,
+    )
+    auto_trade_lstm_learning_enabled = parse_env_bool(
+        os.getenv("AUTO_TRADE_LSTM_LEARNING_ENABLED"),
+        True,
+    )
+    auto_trade_lstm_learning_rate = min(
+        max(parse_env_float(os.getenv("AUTO_TRADE_LSTM_LEARNING_RATE"), 0.08), 0.001),
+        0.5,
+    )
 
     auto_trade_auto_adapt_enabled = parse_env_bool(
         os.getenv("AUTO_TRADE_AUTO_ADAPT_ENABLED"),
@@ -773,6 +1006,45 @@ def load_settings() -> Settings:
         auto_trade_target_atr_pct=auto_trade_target_atr_pct,
         auto_trade_volatility_size_min_mult=auto_trade_volatility_size_min_mult,
         auto_trade_volatility_size_max_mult=auto_trade_volatility_size_max_mult,
+        auto_trade_kelly_enabled=auto_trade_kelly_enabled,
+        auto_trade_kelly_fraction=auto_trade_kelly_fraction,
+        auto_trade_kelly_max_fraction_pct=auto_trade_kelly_max_fraction_pct,
+        auto_trade_kelly_min_trades=auto_trade_kelly_min_trades,
+        auto_trade_correlation_risk_enabled=auto_trade_correlation_risk_enabled,
+        auto_trade_max_correlation=auto_trade_max_correlation,
+        auto_trade_correlation_lookback=auto_trade_correlation_lookback,
+        auto_trade_correlation_risk_mult=auto_trade_correlation_risk_mult,
+        auto_trade_max_drawdown_enabled=auto_trade_max_drawdown_enabled,
+        auto_trade_max_drawdown_pct=auto_trade_max_drawdown_pct,
+        auto_trade_dynamic_exit_enabled=auto_trade_dynamic_exit_enabled,
+        auto_trade_dynamic_exit_min_mult=auto_trade_dynamic_exit_min_mult,
+        auto_trade_dynamic_exit_max_mult=auto_trade_dynamic_exit_max_mult,
+        auto_trade_extreme_volatility_exit_enabled=auto_trade_extreme_volatility_exit_enabled,
+        auto_trade_extreme_volatility_exit_atr_pct=auto_trade_extreme_volatility_exit_atr_pct,
+        auto_trade_extreme_volatility_exit_change_pct=auto_trade_extreme_volatility_exit_change_pct,
+        auto_trade_profit_lock_enabled=auto_trade_profit_lock_enabled,
+        auto_trade_profit_lock_trigger_usdt=auto_trade_profit_lock_trigger_usdt,
+        auto_trade_profit_lock_giveback_pct=auto_trade_profit_lock_giveback_pct,
+        auto_trade_profit_lock_pause_seconds=auto_trade_profit_lock_pause_seconds,
+        auto_trade_profit_lock_risk_mult=auto_trade_profit_lock_risk_mult,
+        auto_trade_confidence_sizing_enabled=auto_trade_confidence_sizing_enabled,
+        auto_trade_confidence_size_min_mult=auto_trade_confidence_size_min_mult,
+        auto_trade_confidence_size_max_mult=auto_trade_confidence_size_max_mult,
+        auto_trade_regime_sizing_enabled=auto_trade_regime_sizing_enabled,
+        auto_trade_regime_risk_on_mult=auto_trade_regime_risk_on_mult,
+        auto_trade_regime_risk_off_mult=auto_trade_regime_risk_off_mult,
+        auto_trade_compounding_enabled=auto_trade_compounding_enabled,
+        auto_trade_compounding_profit_step_usdt=auto_trade_compounding_profit_step_usdt,
+        auto_trade_compounding_max_mult=auto_trade_compounding_max_mult,
+        auto_trade_entry_quality_enabled=auto_trade_entry_quality_enabled,
+        auto_trade_min_entry_score=auto_trade_min_entry_score,
+        auto_trade_min_entry_probability=auto_trade_min_entry_probability,
+        auto_trade_min_risk_reward=auto_trade_min_risk_reward,
+        auto_trade_min_liquidity_score=auto_trade_min_liquidity_score,
+        auto_trade_max_correlated_positions=auto_trade_max_correlated_positions,
+        auto_trade_circuit_breaker_enabled=auto_trade_circuit_breaker_enabled,
+        auto_trade_circuit_breaker_volatility_symbols=auto_trade_circuit_breaker_volatility_symbols,
+        auto_trade_max_daily_loss_pct=auto_trade_max_daily_loss_pct,
         long_rsi_min=long_rsi_min,
         long_rsi_max=long_rsi_max,
         short_rsi_min=short_rsi_min,
@@ -845,6 +1117,24 @@ def load_settings() -> Settings:
             parse_env_float(os.getenv("AI_FILTER_MIN_SCORE_ABS"), 1.0),
             0.0,
         ),
+        advanced_ai_enabled=parse_env_bool(os.getenv("ADVANCED_AI_ENABLED"), True),
+        advanced_ai_quantum_enabled=parse_env_bool(
+            os.getenv("ADVANCED_AI_QUANTUM_ENABLED"),
+            True,
+        ),
+        sentiment_enabled=parse_env_bool(os.getenv("SENTIMENT_ENABLED"), True),
+        sentiment_lookback_minutes=max(
+            parse_env_int(os.getenv("SENTIMENT_LOOKBACK_MINUTES"), 180),
+            1,
+        ),
+        market_regime_enabled=market_regime_enabled,
+        market_regime_clusters=market_regime_clusters,
+        auto_trade_self_learning_enabled=auto_trade_self_learning_enabled,
+        auto_trade_self_learning_min_trades=auto_trade_self_learning_min_trades,
+        auto_trade_self_learning_risk_min_mult=auto_trade_self_learning_risk_min_mult,
+        auto_trade_self_learning_risk_max_mult=auto_trade_self_learning_risk_max_mult,
+        auto_trade_lstm_learning_enabled=auto_trade_lstm_learning_enabled,
+        auto_trade_lstm_learning_rate=auto_trade_lstm_learning_rate,
         auto_trade_auto_adapt_enabled=auto_trade_auto_adapt_enabled,
         auto_trade_auto_adapt_low_atr_pct=auto_trade_auto_adapt_low_atr_pct,
         auto_trade_auto_adapt_high_atr_pct=auto_trade_auto_adapt_high_atr_pct,

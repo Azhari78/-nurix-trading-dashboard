@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from services.advanced_ai import AdvancedDecisionEngine
 from services.alerts import AlertService
 from services.config import Settings
 from services.exchange import ExchangeGateway
@@ -19,6 +20,8 @@ from services.indicators import (
     score_indicator_state,
 )
 from services.market_state import MarketStateManager
+from services.regime import MarketRegimeDetector
+from services.sentiment import SentimentService
 from services.state import RuntimeState
 from services.trading import TradingService
 
@@ -32,6 +35,7 @@ class MarketService:
         market_state: MarketStateManager,
         alerts: AlertService,
         trading: TradingService,
+        sentiment: SentimentService,
         logger: logging.Logger,
     ) -> None:
         self.settings = settings
@@ -40,7 +44,17 @@ class MarketService:
         self.market_state = market_state
         self.alerts = alerts
         self.trading = trading
+        self.sentiment = sentiment
         self.logger = logger
+        self.advanced_decision = AdvancedDecisionEngine(
+            state,
+            enabled=settings.advanced_ai_enabled,
+            quantum_enabled=settings.advanced_ai_quantum_enabled,
+        )
+        self.regime_detector = MarketRegimeDetector(
+            enabled=settings.market_regime_enabled,
+            clusters=settings.market_regime_clusters,
+        )
         self._indicator_backoff_until: dict[str, float] = {}
         self._indicator_last_error: dict[str, str] = {}
         self._row_error_logged_at: dict[str, float] = {}
@@ -137,6 +151,20 @@ class MarketService:
                 "ema_middle_slow_span": float(middle_slow_span),
                 "ema_strong_fast_span": float(strong_fast_span),
                 "ema_strong_slow_span": float(strong_slow_span),
+                "vortex_plus": cached_float(source, "vortex_plus", 0.0),
+                "vortex_minus": cached_float(source, "vortex_minus", 0.0),
+                "vortex_diff": cached_float(source, "vortex_diff", 0.0),
+                "stoch_rsi_k": cached_float(source, "stoch_rsi_k", 50.0),
+                "stoch_rsi_d": cached_float(source, "stoch_rsi_d", 50.0),
+                "ultimate_oscillator": cached_float(source, "ultimate_oscillator", 50.0),
+                "keltner_mid": cached_float(source, "keltner_mid", ema20),
+                "keltner_upper": cached_float(source, "keltner_upper", ema20),
+                "keltner_lower": cached_float(source, "keltner_lower", ema20),
+                "keltner_width_pct": cached_float(source, "keltner_width_pct", 0.0),
+                "keltner_position": cached_float(source, "keltner_position", 50.0),
+                "fourier_cycle_period": cached_float(source, "fourier_cycle_period", 0.0),
+                "fourier_cycle_strength": cached_float(source, "fourier_cycle_strength", 0.0),
+                "hurst_exponent": cached_float(source, "hurst_exponent", 0.5),
             }
 
         cached = self.state.indicator_cache.get(cache_key)
@@ -194,6 +222,10 @@ class MarketService:
         ):
             raise ValueError("Indicators not ready")
 
+        def last_float(key: str, default: float = 0.0) -> float:
+            value = last.get(key)
+            return float(value) if pd.notna(value) else default
+
         payload = {
             "updated_at": now,
             "rsi": float(last["rsi"]),
@@ -212,6 +244,20 @@ class MarketService:
             "ema_middle_slow": float(last[self._ema_column(middle_slow_span)]),
             "ema_strong_fast": float(last[self._ema_column(strong_fast_span)]),
             "ema_strong_slow": float(last[self._ema_column(strong_slow_span)]),
+            "vortex_plus": last_float("vortex_plus"),
+            "vortex_minus": last_float("vortex_minus"),
+            "vortex_diff": last_float("vortex_diff"),
+            "stoch_rsi_k": last_float("stoch_rsi_k", 50.0),
+            "stoch_rsi_d": last_float("stoch_rsi_d", 50.0),
+            "ultimate_oscillator": last_float("ultimate_oscillator", 50.0),
+            "keltner_mid": last_float("keltner_mid", float(last["ema20"])),
+            "keltner_upper": last_float("keltner_upper", float(last["ema20"])),
+            "keltner_lower": last_float("keltner_lower", float(last["ema20"])),
+            "keltner_width_pct": last_float("keltner_width_pct"),
+            "keltner_position": last_float("keltner_position", 50.0),
+            "fourier_cycle_period": last_float("fourier_cycle_period"),
+            "fourier_cycle_strength": last_float("fourier_cycle_strength"),
+            "hurst_exponent": last_float("hurst_exponent", 0.5),
         }
         self.state.indicator_cache[cache_key] = payload
         self._indicator_backoff_until.pop(cache_key, None)
@@ -440,8 +486,14 @@ class MarketService:
                     if isinstance(orderflow_payload, dict)
                     else {}
                 )
+                microstructure = (
+                    (orderflow_payload or {}).get("microstructure", {})
+                    if isinstance(orderflow_payload, dict)
+                    else {}
+                )
                 spread = safe_float(orderbook.get("spread"))
                 spread_pct = safe_float(orderbook.get("spread_pct"))
+                sentiment_payload = self.sentiment.score_symbol(symbol)
 
                 signal = get_signal(
                     price=price,
@@ -460,6 +512,21 @@ class MarketService:
                     strength_score=float(strength["score"]),
                     change_24h=change_24h,
                 )
+                advanced_context = {
+                    **indicators,
+                    "symbol": symbol,
+                    "price": price,
+                    "change_24h": change_24h,
+                    "spread_pct": spread_pct,
+                    "strength_score": strength["score"],
+                }
+                advanced_ai = self.advanced_decision.evaluate(
+                    row=advanced_context,
+                    microstructure=microstructure,
+                    sentiment=sentiment_payload,
+                    legacy_ai=ai_filter,
+                )
+                quantum = advanced_ai.get("quantum") if isinstance(advanced_ai, dict) else None
 
                 rows.append(
                     {
@@ -489,17 +556,69 @@ class MarketService:
                         "macd": round(indicators["macd"], 6),
                         "macd_signal": round(indicators["macd_signal"], 6),
                         "atr_pct": round(float(indicators.get("atr_pct") or 0.0), 3),
+                        "vortex_plus": round(float(indicators.get("vortex_plus") or 0.0), 4),
+                        "vortex_minus": round(float(indicators.get("vortex_minus") or 0.0), 4),
+                        "vortex_diff": round(float(indicators.get("vortex_diff") or 0.0), 4),
+                        "stoch_rsi_k": round(float(indicators.get("stoch_rsi_k") or 0.0), 2),
+                        "stoch_rsi_d": round(float(indicators.get("stoch_rsi_d") or 0.0), 2),
+                        "ultimate_oscillator": round(
+                            float(indicators.get("ultimate_oscillator") or 0.0),
+                            2,
+                        ),
+                        "keltner_mid": round(float(indicators.get("keltner_mid") or 0.0), 6),
+                        "keltner_upper": round(float(indicators.get("keltner_upper") or 0.0), 6),
+                        "keltner_lower": round(float(indicators.get("keltner_lower") or 0.0), 6),
+                        "keltner_width_pct": round(
+                            float(indicators.get("keltner_width_pct") or 0.0),
+                            3,
+                        ),
+                        "keltner_position": round(
+                            float(indicators.get("keltner_position") or 0.0),
+                            2,
+                        ),
+                        "fourier_cycle_period": round(
+                            float(indicators.get("fourier_cycle_period") or 0.0),
+                            2,
+                        ),
+                        "fourier_cycle_strength": round(
+                            float(indicators.get("fourier_cycle_strength") or 0.0),
+                            2,
+                        ),
+                        "hurst_exponent": round(
+                            float(indicators.get("hurst_exponent") or 0.5),
+                            3,
+                        ),
                         "spread": round(spread, 6) if spread is not None else None,
                         "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
                         "volume_ratio": round(float(indicators.get("volume_ratio") or 1.0), 3),
+                        "microstructure_pressure": microstructure.get("pressure_score"),
+                        "microstructure_bias": microstructure.get("pressure_bias"),
+                        "depth_imbalance_pct": microstructure.get("depth_imbalance_pct"),
+                        "trade_imbalance_pct": microstructure.get("trade_imbalance_pct"),
+                        "liquidity_score": microstructure.get("liquidity_score"),
+                        "sentiment_score": sentiment_payload.get("score"),
+                        "sentiment_bias": sentiment_payload.get("bias"),
+                        "sentiment_confidence": sentiment_payload.get("confidence"),
+                        "sentiment_sources": sentiment_payload.get("source_count"),
                         "signal": signal,
                         "strength": strength["label"],
                         "strength_score": strength["score"],
                         "strength_confidence": strength["confidence"],
                         "strength_timeframes": strength["timeframes"],
-                        "ai_score": ai_filter["score"],
-                        "ai_confidence": ai_filter["confidence"],
-                        "ai_bias": ai_filter["bias"],
+                        "legacy_ai_score": ai_filter["score"],
+                        "legacy_ai_confidence": ai_filter["confidence"],
+                        "legacy_ai_bias": ai_filter["bias"],
+                        "ai_score": advanced_ai["score"],
+                        "ai_confidence": advanced_ai["confidence"],
+                        "ai_bias": advanced_ai["bias"],
+                        "advanced_ai": advanced_ai,
+                        "quantum_action": quantum.get("action") if isinstance(quantum, dict) else None,
+                        "quantum_confidence": (
+                            quantum.get("confidence") if isinstance(quantum, dict) else None
+                        ),
+                        "quantum_coherence": (
+                            quantum.get("coherence") if isinstance(quantum, dict) else None
+                        ),
                     }
                 )
             except Exception as exc:  # noqa: BLE001
@@ -548,20 +667,62 @@ class MarketService:
                         "macd": None,
                         "macd_signal": None,
                         "atr_pct": None,
+                        "vortex_plus": None,
+                        "vortex_minus": None,
+                        "vortex_diff": None,
+                        "stoch_rsi_k": None,
+                        "stoch_rsi_d": None,
+                        "ultimate_oscillator": None,
+                        "keltner_mid": None,
+                        "keltner_upper": None,
+                        "keltner_lower": None,
+                        "keltner_width_pct": None,
+                        "keltner_position": None,
+                        "fourier_cycle_period": None,
+                        "fourier_cycle_strength": None,
+                        "hurst_exponent": None,
                         "spread": None,
                         "spread_pct": None,
                         "volume_ratio": None,
+                        "microstructure_pressure": None,
+                        "microstructure_bias": "NEUTRAL",
+                        "depth_imbalance_pct": None,
+                        "trade_imbalance_pct": None,
+                        "liquidity_score": None,
+                        "sentiment_score": 0.0,
+                        "sentiment_bias": "HOLD",
+                        "sentiment_confidence": 0,
+                        "sentiment_sources": 0,
                         "signal": "HOLD",
                         "strength": "HOLD",
                         "strength_score": 0.0,
                         "strength_confidence": 0,
                         "strength_timeframes": 0,
+                        "legacy_ai_score": 0.0,
+                        "legacy_ai_confidence": 0,
+                        "legacy_ai_bias": "HOLD",
                         "ai_score": 0.0,
                         "ai_confidence": 0,
                         "ai_bias": "HOLD",
+                        "advanced_ai": {
+                            "enabled": False,
+                            "score": 0.0,
+                            "confidence": 0,
+                            "bias": "HOLD",
+                            "ensemble": {"models": [], "weights": {}},
+                            "quantum": None,
+                        },
+                        "quantum_action": None,
+                        "quantum_confidence": None,
+                        "quantum_coherence": None,
                         "error": str(exc),
                     }
                 )
+
+        try:
+            self.state.market_regime_summary = self.regime_detector.assign(rows)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Market regime detection failed: %s", exc)
 
         return rows
 
@@ -1099,6 +1260,41 @@ class MarketService:
                 if pd.notna(last["macd_signal"])
                 else None
             ),
+            "vortex_diff": (
+                round(float(last["vortex_diff"]), 4)
+                if pd.notna(last.get("vortex_diff"))
+                else None
+            ),
+            "stoch_rsi_k": (
+                round(float(last["stoch_rsi_k"]), 2)
+                if pd.notna(last.get("stoch_rsi_k"))
+                else None
+            ),
+            "ultimate_oscillator": (
+                round(float(last["ultimate_oscillator"]), 2)
+                if pd.notna(last.get("ultimate_oscillator"))
+                else None
+            ),
+            "keltner_position": (
+                round(float(last["keltner_position"]), 2)
+                if pd.notna(last.get("keltner_position"))
+                else None
+            ),
+            "fourier_cycle_period": (
+                round(float(last["fourier_cycle_period"]), 2)
+                if pd.notna(last.get("fourier_cycle_period"))
+                else None
+            ),
+            "fourier_cycle_strength": (
+                round(float(last["fourier_cycle_strength"]), 2)
+                if pd.notna(last.get("fourier_cycle_strength"))
+                else None
+            ),
+            "hurst_exponent": (
+                round(float(last["hurst_exponent"]), 3)
+                if pd.notna(last.get("hurst_exponent"))
+                else None
+            ),
         }
 
         payload = {
@@ -1161,6 +1357,13 @@ class MarketService:
                 "vwap_session": None,
                 "macd": None,
                 "macd_signal": None,
+                "vortex_diff": None,
+                "stoch_rsi_k": None,
+                "ultimate_oscillator": None,
+                "keltner_position": None,
+                "fourier_cycle_period": None,
+                "fourier_cycle_strength": None,
+                "hurst_exponent": None,
             },
         }
 

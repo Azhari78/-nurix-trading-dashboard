@@ -22,6 +22,7 @@ from services.exchange import ExchangeGateway
 from services.exchange_stream import ExchangeStreamService
 from services.market import MarketService
 from services.market_state import MarketStateManager
+from services.sentiment import SentimentService
 from services.state import RuntimeState
 from services.trading import TradingService
 from websocket.manager import WebSocketManager
@@ -43,7 +44,13 @@ market_state = MarketStateManager(
 exchange_stream = ExchangeStreamService(settings, market_state, logger)
 alerts = AlertService(state, settings=settings, logger=logger)
 trading = TradingService(settings, state, exchange, alerts, logger)
-market = MarketService(settings, state, exchange, market_state, alerts, trading, logger)
+sentiment = SentimentService(
+    state,
+    enabled=settings.sentiment_enabled,
+    lookback_minutes=settings.sentiment_lookback_minutes,
+    logger=logger,
+)
+market = MarketService(settings, state, exchange, market_state, alerts, trading, sentiment, logger)
 ws_manager = WebSocketManager(
     push_interval_seconds=settings.push_interval_seconds,
     symbols=settings.symbols,
@@ -111,6 +118,15 @@ class AlertBuilderTriggerPayload(BaseModel):
     severity: str = "medium"
     type: str = "builder_rule"
     meta: dict[str, Any] | None = None
+
+
+class SentimentIngestPayload(BaseModel):
+    symbol: str = "GLOBAL"
+    source: str = "manual"
+    text: str = ""
+    score: float | None = None
+    weight: float = 1.0
+    timestamp: int | None = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -214,6 +230,29 @@ def alert_builder_trigger(payload: AlertBuilderTriggerPayload) -> dict[str, Any]
         meta=merged_meta,
     )
     return {"ok": True, "symbol": symbol, "type": alert_type}
+
+
+@app.get("/api/sentiment")
+def sentiment_status(symbol: str = "GLOBAL") -> dict[str, Any]:
+    normalized_symbol = (symbol or settings.default_symbol).strip().upper()
+    return sentiment.score_symbol(normalized_symbol)
+
+
+@app.post("/api/sentiment/ingest")
+def sentiment_ingest(payload: SentimentIngestPayload) -> dict[str, Any]:
+    event = sentiment.ingest(
+        symbol=payload.symbol,
+        source=payload.source,
+        text=payload.text,
+        score=payload.score,
+        weight=payload.weight,
+        timestamp=payload.timestamp,
+    )
+    return {
+        "ok": True,
+        "event": event,
+        "sentiment": sentiment.score_symbol(str(event.get("symbol") or "GLOBAL")),
+    }
 
 
 @app.websocket("/ws")

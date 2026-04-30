@@ -18,6 +18,9 @@ const statRsi = document.getElementById("stat-rsi");
 const statEma = document.getElementById("stat-ema");
 const statSignal = document.getElementById("stat-signal");
 const statStrength = document.getElementById("stat-strength");
+const statQuantum = document.getElementById("stat-quantum");
+const statSentiment = document.getElementById("stat-sentiment");
+const statMicrostructure = document.getElementById("stat-microstructure");
 const moversGainersNode = document.getElementById("movers-gainers");
 const moversLosersNode = document.getElementById("movers-losers");
 const moversVolumeNode = document.getElementById("movers-volume");
@@ -56,6 +59,9 @@ const chartMiniPressureNode = document.getElementById("chart-mini-pressure");
 
 const execOutMarketState = document.getElementById("exec-out-market-state");
 const execOutAiGate = document.getElementById("exec-out-ai-gate");
+const execOutQuantum = document.getElementById("exec-out-quantum");
+const execOutSentiment = document.getElementById("exec-out-sentiment");
+const execOutMicrostructure = document.getElementById("exec-out-microstructure");
 const execOutStrengthGate = document.getElementById("exec-out-strength-gate");
 const execOutVolumeGate = document.getElementById("exec-out-volume-gate");
 const execOutEmaGate = document.getElementById("exec-out-ema-gate");
@@ -127,6 +133,10 @@ const autoTradeSelectedNode = document.getElementById("auto-trade-selected");
 const autoTradeNoteNode = document.getElementById("auto-trade-note");
 const autoTradeAdaptiveNode = document.getElementById("auto-trade-adaptive");
 const autoTradeCopyNode = document.getElementById("auto-trade-copy");
+const autoTradeAdvancedRiskNode = document.getElementById("auto-trade-advanced-risk");
+const autoTradePerformanceNode = document.getElementById("auto-trade-performance");
+const autoTradeRegimeNode = document.getElementById("auto-trade-regime");
+const autoTradeLearningNode = document.getElementById("auto-trade-learning");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
 const autoTradeDailyPnlHistoryNode = document.getElementById("auto-trade-daily-pnl-history");
 const copyTradeEventsNode = document.getElementById("copy-trade-events");
@@ -688,6 +698,9 @@ function updateStats(summary) {
     statEma.textContent = "-";
     statSignal.textContent = "-";
     statStrength.textContent = "-";
+    if (statQuantum) statQuantum.textContent = "-";
+    if (statSentiment) statSentiment.textContent = "-";
+    if (statMicrostructure) statMicrostructure.textContent = "-";
     updateExecutionPanel();
     updateChartOverlay();
     return;
@@ -721,6 +734,35 @@ function updateStats(summary) {
   statStrength.classList.remove("pos", "neg");
   if (strengthValue.includes("BUY")) statStrength.classList.add("pos");
   if (strengthValue.includes("SELL")) statStrength.classList.add("neg");
+
+  const quantumAction = String(summary.quantum_action || "HOLD").toUpperCase();
+  const quantumConfidence = Number(summary.quantum_confidence);
+  const quantumCoherence = Number(summary.quantum_coherence);
+  if (statQuantum) {
+    statQuantum.textContent = `${quantumAction} ${Number.isFinite(quantumConfidence) ? `(${fmtNumber(quantumConfidence, 0)}%)` : ""} • coh ${fmtNumber(quantumCoherence, 0)}%`;
+    statQuantum.classList.remove("pos", "neg");
+    if (quantumAction === "BUY") statQuantum.classList.add("pos");
+    if (quantumAction === "SELL") statQuantum.classList.add("neg");
+  }
+
+  const sentimentBias = String(summary.sentiment_bias || "HOLD").toUpperCase();
+  const sentimentScore = Number(summary.sentiment_score);
+  const sentimentConfidence = Number(summary.sentiment_confidence);
+  if (statSentiment) {
+    statSentiment.textContent = `${sentimentBias} ${fmtNumber(sentimentScore, 1)} • ${fmtNumber(sentimentConfidence, 0)}%`;
+    statSentiment.classList.remove("pos", "neg");
+    if (sentimentBias === "BUY") statSentiment.classList.add("pos");
+    if (sentimentBias === "SELL") statSentiment.classList.add("neg");
+  }
+
+  const microBias = String(summary.microstructure_bias || "NEUTRAL").toUpperCase();
+  const microPressure = Number(summary.microstructure_pressure);
+  if (statMicrostructure) {
+    statMicrostructure.textContent = `${microBias} • ${fmtNumber(microPressure, 1)}%`;
+    statMicrostructure.classList.remove("pos", "neg");
+    if (microBias === "BUY") statMicrostructure.classList.add("pos");
+    if (microBias === "SELL") statMicrostructure.classList.add("neg");
+  }
 
   updateExecutionPanel();
   updateChartOverlay();
@@ -923,6 +965,9 @@ function renderOrderflow(orderflow) {
   const spread = Number(orderbook.spread);
   const spreadPct = Number(orderbook.spread_pct);
   const mid = Number(orderbook.mid);
+  const microstructure = payload.microstructure || {};
+  const pressureBias = String(microstructure.pressure_bias || "NEUTRAL").toUpperCase();
+  const pressureScore = Number(microstructure.pressure_score);
   const hasSpread = !Number.isNaN(spread);
   const hasSpreadPct = !Number.isNaN(spreadPct);
   const hasMid = !Number.isNaN(mid);
@@ -932,7 +977,10 @@ function renderOrderflow(orderflow) {
       const spreadText = hasSpread ? fmtPrice(spread) : "-";
       const spreadPctText = hasSpreadPct ? `${fmtNumber(spreadPct, 3)}%` : "-";
       const midText = hasMid ? fmtPrice(mid) : "-";
-      orderflowMetaNode.textContent = `Spread: ${spreadText} (${spreadPctText}) • Mid: ${midText}`;
+      const pressureText = Number.isFinite(pressureScore)
+        ? ` • Pressure: ${pressureBias} ${fmtNumber(pressureScore, 1)}%`
+        : "";
+      orderflowMetaNode.textContent = `Spread: ${spreadText} (${spreadPctText}) • Mid: ${midText}${pressureText}`;
     } else {
       orderflowMetaNode.textContent = "Spread: -";
     }
@@ -2913,6 +2961,9 @@ function updateExecutionPanel() {
   const requiredNodes = [
     execOutMarketState,
     execOutAiGate,
+    execOutQuantum,
+    execOutSentiment,
+    execOutMicrostructure,
     execOutStrengthGate,
     execOutVolumeGate,
     execOutEmaGate,
@@ -2964,11 +3015,21 @@ function updateExecutionPanel() {
   const atrPct = Number(currentSummary.atr_pct);
   const change24h = Number(currentSummary.change_24h);
   const livePrice = Number(currentSummary.price);
+  const quantumAction = String(currentSummary.quantum_action || "HOLD").toUpperCase();
+  const quantumConfidence = Number(currentSummary.quantum_confidence);
+  const quantumCoherence = Number(currentSummary.quantum_coherence);
+  const sentimentBias = String(currentSummary.sentiment_bias || "HOLD").toUpperCase();
+  const sentimentScore = Number(currentSummary.sentiment_score);
+  const sentimentConfidence = Number(currentSummary.sentiment_confidence);
+  const microBias = String(currentSummary.microstructure_bias || "NEUTRAL").toUpperCase();
+  const microPressure = Number(currentSummary.microstructure_pressure);
+  const depthImbalance = Number(currentSummary.depth_imbalance_pct);
+  const tradeImbalance = Number(currentSummary.trade_imbalance_pct);
 
   const minStrength = Number(auto.min_strength_confidence);
   const minVolumeRatio = Number(auto.min_volume_ratio);
   const aiFilterEnabled = Boolean(auto.ai_filter_enabled);
-  const adaptiveMinConf = Number(auto.adaptive_ai_min_confidence);
+  const adaptiveMinConf = Number(auto.effective_ai_min_confidence ?? auto.adaptive_ai_min_confidence);
   const fixedMinConf = Number(auto.ai_filter_min_confidence);
   const minAiConfidence = (
     Number.isFinite(adaptiveMinConf) && adaptiveMinConf > 0
@@ -3121,6 +3182,16 @@ function updateExecutionPanel() {
       + `• |score| ${fmtNumber(Math.abs(Number.isFinite(aiScore) ? aiScore : 0), 2)} >= ${fmtNumber(minAiScoreAbs, 2)}`
     )
     : "OFF";
+  const quantumGateText = Boolean(auto.advanced_ai_quantum_enabled)
+    ? `${quantumAction} • conf ${fmtNumber(quantumConfidence, 0)}% • coherence ${fmtNumber(quantumCoherence, 0)}%`
+    : "OFF";
+  const sentimentGateText = Boolean(auto.sentiment_enabled)
+    ? `${sentimentBias} • score ${fmtNumber(sentimentScore, 1)} • conf ${fmtNumber(sentimentConfidence, 0)}%`
+    : "OFF";
+  const microstructureGateText = (
+    `${microBias} • pressure ${fmtNumber(microPressure, 1)}% `
+    + `• depth ${fmtNumber(depthImbalance, 1)}% • tape ${fmtNumber(tradeImbalance, 1)}%`
+  );
   const strengthGateText = (
     Number.isFinite(minStrength) && minStrength > 0
       ? `${strengthPass ? "PASS" : "BLOCK"} • ${fmtNumber(strengthConfidence, 0)}% / min ${fmtNumber(minStrength, 0)}%`
@@ -3157,6 +3228,9 @@ function updateExecutionPanel() {
     `${signal} • RSI ${fmtNumber(rsi, 2)} • AI ${aiBias} (${fmtNumber(aiConfidence, 0)}%)`,
   );
   setExecutionOutput(execOutAiGate, aiGateText);
+  setExecutionOutput(execOutQuantum, quantumGateText);
+  setExecutionOutput(execOutSentiment, sentimentGateText);
+  setExecutionOutput(execOutMicrostructure, microstructureGateText);
   setExecutionOutput(execOutStrengthGate, strengthGateText);
   setExecutionOutput(execOutVolumeGate, volumeGateText);
   setExecutionOutput(execOutEmaGate, emaGateText);
@@ -3198,6 +3272,22 @@ function updateExecutionPanel() {
   const macdGatePassForMode = (!allowLong || longMacdPass) && (!allowShort || shortMacdPass);
 
   setExecutionGateTone(execOutAiGate, aiFilterEnabled ? aiGatePassForMode : null);
+  setExecutionGateTone(
+    execOutQuantum,
+    Boolean(auto.advanced_ai_quantum_enabled)
+      ? (quantumAction === "BUY" || quantumAction === "SELL" ? quantumAction === aiBias : null)
+      : null,
+  );
+  setExecutionGateTone(
+    execOutSentiment,
+    Boolean(auto.sentiment_enabled)
+      ? (sentimentBias === "BUY" || sentimentBias === "SELL" ? sentimentBias === aiBias : null)
+      : null,
+  );
+  setExecutionGateTone(
+    execOutMicrostructure,
+    microBias === "BUY" || microBias === "SELL" ? microBias === aiBias : null,
+  );
   setExecutionGateTone(
     execOutStrengthGate,
     Number.isFinite(minStrength) && minStrength > 0 ? strengthPass : null,
@@ -3271,7 +3361,7 @@ function updateGateFailAnalytics() {
   const minStrength = Number(auto.min_strength_confidence);
   const minVolumeRatio = Number(auto.min_volume_ratio);
   const aiFilterEnabled = Boolean(auto.ai_filter_enabled);
-  const adaptiveMinConf = Number(auto.adaptive_ai_min_confidence);
+  const adaptiveMinConf = Number(auto.effective_ai_min_confidence ?? auto.adaptive_ai_min_confidence);
   const fixedMinConf = Number(auto.ai_filter_min_confidence);
   const minAiConfidence = (
     Number.isFinite(adaptiveMinConf) && adaptiveMinConf > 0
@@ -3601,6 +3691,8 @@ function renderAutoTrade(payload) {
   const dailyPnlHistoryDays = Number(data.daily_pnl_history_days || 30);
   const dailyPnlHistory = Array.isArray(data.daily_pnl_history) ? data.daily_pnl_history : [];
   const lossLimit = Number(data.daily_loss_limit_usdt);
+  const lossLimitBasis = String(data.daily_loss_limit_basis || "");
+  const maxDailyLossPct = Number(data.max_daily_loss_pct);
   const tradeSizeUsdt = Number(data.trade_size_usdt);
   const tradeSizeUsdtMin = Number(data.trade_size_usdt_min);
   const tradeSizeUsdtMax = Number(data.trade_size_usdt_max);
@@ -3624,6 +3716,7 @@ function renderAutoTrade(payload) {
   const guardrailActive = Boolean(data.guardrail_active);
   const guardrailHaltEnabled = Boolean(data.forward_guardrail_halt_enabled);
   const consecutiveLosses = Number(data.consecutive_losses || 0);
+  const consecutiveWins = Number(data.consecutive_wins || 0);
   const symbols = Array.isArray(data.symbols) ? data.symbols : [];
   const selected = data.selected_position || null;
   const recentEvents = Array.isArray(data.recent_events) ? data.recent_events : [];
@@ -3632,11 +3725,36 @@ function renderAutoTrade(payload) {
   const adaptiveEnabled = Boolean(data.adaptive_enabled);
   const adaptiveProfile = String(data.adaptive_profile || "MIDDLE");
   const adaptiveReason = String(data.adaptive_reason || "");
-  const adaptiveAiMinConfidence = Number(data.adaptive_ai_min_confidence);
+  const adaptiveAiMinConfidence = Number(data.effective_ai_min_confidence ?? data.adaptive_ai_min_confidence);
   const adaptiveRiskMultiplier = Number(data.adaptive_risk_multiplier);
   const adaptiveCooldownMultiplier = Number(data.adaptive_cooldown_multiplier);
   const adaptiveEmaFastSpan = Number(data.adaptive_ema_fast_span);
   const adaptiveEmaSlowSpan = Number(data.adaptive_ema_slow_span);
+  const performance = data.performance && typeof data.performance === "object" ? data.performance : {};
+  const marketRegime = data.market_regime && typeof data.market_regime === "object" ? data.market_regime : {};
+  const selfLearning = data.self_learning && typeof data.self_learning === "object" ? data.self_learning : {};
+  const kellyEnabled = Boolean(data.kelly_enabled);
+  const kellyMaxFractionPct = Number(data.kelly_max_fraction_pct);
+  const correlationRiskEnabled = Boolean(data.correlation_risk_enabled);
+  const maxCorrelation = Number(data.max_correlation);
+  const maxCorrelatedPositions = Number(data.max_correlated_positions);
+  const currentDrawdownPct = Number(data.current_drawdown_pct);
+  const maxDrawdownPct = Number(data.max_drawdown_pct);
+  const maxDrawdownLimitPct = Number(data.max_drawdown_limit_pct);
+  const profitLockEnabled = Boolean(data.profit_lock_enabled);
+  const profitLockActive = Boolean(data.profit_lock_active);
+  const profitLockTriggerUsdt = Number(data.profit_lock_trigger_usdt);
+  const profitLockGivebackPct = Number(data.profit_lock_giveback_pct);
+  const dailyPeakPnlUsdt = Number(data.daily_peak_pnl_usdt);
+  const entryQualityEnabled = Boolean(data.entry_quality_enabled);
+  const minEntryScore = Number(data.min_entry_score);
+  const minEntryProbability = Number(data.min_entry_probability);
+  const minRiskReward = Number(data.min_risk_reward);
+  const circuitBreakerEnabled = Boolean(data.circuit_breaker_enabled);
+  const circuitBreakerVolatilitySymbols = Number(data.circuit_breaker_volatility_symbols);
+  const lstmLearningEnabled = Boolean(data.lstm_learning_enabled);
+  const lstmStateCount = Number(data.lstm_state_count || 0);
+  const lstmUpdateCount = Number(data.lstm_update_count || 0);
   const copyTradeEnabled = Boolean(data.copy_trade_enabled);
   const copyTradeFollowers = Array.isArray(data.copy_trade_followers)
     ? data.copy_trade_followers
@@ -3657,7 +3775,13 @@ function renderAutoTrade(payload) {
       ? "Paused (Guardrail)"
       : haltType === "loss_streak"
         ? "Paused (Loss Streak)"
-        : "Paused (Risk)";
+        : haltType === "drawdown"
+          ? "Paused (Drawdown)"
+          : haltType === "profit_lock"
+            ? "Paused (Profit Lock)"
+            : haltType === "circuit_breaker"
+              ? "Paused (Circuit)"
+              : "Paused (Risk)";
 
   if (autoTradeStatusNode) {
     if (!enabled) {
@@ -3725,7 +3849,9 @@ function renderAutoTrade(payload) {
   }
 
   if (autoTradeRiskNode) {
-    const limitText = Number.isNaN(lossLimit) ? "-" : `-${lossLimit.toFixed(2)} USDT`;
+    const limitText = Number.isNaN(lossLimit)
+      ? "-"
+      : `-${lossLimit.toFixed(2)} USDT${lossLimitBasis ? ` (${lossLimitBasis})` : ""}`;
     const sizeRangeText =
       !Number.isNaN(tradeSizeUsdtMin) &&
       !Number.isNaN(tradeSizeUsdtMax) &&
@@ -3759,7 +3885,10 @@ function renderAutoTrade(payload) {
     const autoConvertText = autoConvertToUsdt
       ? `Auto USDT ON (>=${Number.isNaN(autoConvertMinUsdt) ? "-" : fmtNumber(autoConvertMinUsdt, 2)} USDT)`
       : "Auto USDT OFF";
-    const lossesText = `Losing Streak ${Number.isNaN(consecutiveLosses) ? 0 : consecutiveLosses}`;
+    const streakText = (
+      `Streak W${Number.isNaN(consecutiveWins) ? 0 : consecutiveWins}`
+      + `/L${Number.isNaN(consecutiveLosses) ? 0 : consecutiveLosses}`
+    );
     const shortText = shortEnabled ? "SHORT ON" : "SHORT OFF";
     const sameTpTarget = (
       Number.isFinite(longTakeProfitPct)
@@ -3789,7 +3918,7 @@ function renderAutoTrade(payload) {
       : maxOpenPositions <= 0
         ? `${openPositions}/Unlimited`
         : `${openPositions}/${maxOpenPositions}`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${tpRunText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${lossesText} • Open ${openText}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${tpRunText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${streakText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
@@ -3835,6 +3964,90 @@ function renderAutoTrade(payload) {
         : fmtNumber(copyTradeSlippageBps, 1);
       autoTradeCopyNode.textContent = `${followerLabel} • slippage ${slippageLabel}bps`;
     }
+  }
+
+  if (autoTradeAdvancedRiskNode) {
+    const kellyText = kellyEnabled
+      ? `Kelly cap ${Number.isFinite(kellyMaxFractionPct) ? fmtNumber(kellyMaxFractionPct, 2) : "-"}%`
+      : "Kelly OFF";
+    const corrText = correlationRiskEnabled
+      ? `Corr <= ${Number.isFinite(maxCorrelation) ? fmtNumber(maxCorrelation, 2) : "-"} / max ${Number.isFinite(maxCorrelatedPositions) ? Math.trunc(maxCorrelatedPositions) : "-"}`
+      : "Corr OFF";
+    const ddText = Number.isFinite(currentDrawdownPct)
+      ? `DD ${fmtNumber(currentDrawdownPct, 2)}% / max ${fmtNumber(maxDrawdownPct, 2)}% / limit ${fmtNumber(maxDrawdownLimitPct, 2)}%`
+      : "DD -";
+    const profitLockText = profitLockEnabled
+      ? (
+        `Profit Lock ${profitLockActive ? "ON" : "READY"} `
+        + `peak ${Number.isFinite(dailyPeakPnlUsdt) ? fmtPnlUsdt(dailyPeakPnlUsdt) : "-"} `
+        + `trigger ${Number.isFinite(profitLockTriggerUsdt) ? fmtNumber(profitLockTriggerUsdt, 2) : "-"} `
+        + `giveback ${Number.isFinite(profitLockGivebackPct) ? fmtNumber(profitLockGivebackPct, 0) : "-"}%`
+      )
+      : "Profit Lock OFF";
+    const circuitText = circuitBreakerEnabled
+      ? `Circuit ON (${Number.isFinite(circuitBreakerVolatilitySymbols) ? Math.trunc(circuitBreakerVolatilitySymbols) : "-"} vol symbols)`
+      : "Circuit OFF";
+    const dailyLossPctText = Number.isFinite(maxDailyLossPct)
+      ? `Daily loss ${fmtNumber(maxDailyLossPct, 1)}%`
+      : "Daily loss -";
+    autoTradeAdvancedRiskNode.textContent = `${kellyText} • ${corrText} • ${ddText} • ${dailyLossPctText} • ${profitLockText} • ${circuitText}`;
+    autoTradeAdvancedRiskNode.classList.remove("pos", "neg");
+    if (
+      (Number.isFinite(currentDrawdownPct) && Number.isFinite(maxDrawdownLimitPct) && currentDrawdownPct >= maxDrawdownLimitPct)
+      || profitLockActive
+    ) {
+      autoTradeAdvancedRiskNode.classList.add("neg");
+    }
+  }
+
+  if (autoTradePerformanceNode) {
+    const winRate = Number(performance.win_rate);
+    const sharpe = Number(performance.sharpe_ratio);
+    const sortino = Number(performance.sortino_ratio);
+    const profitFactor = Number(performance.profit_factor);
+    const trades = Number(performance.trade_count || 0);
+    autoTradePerformanceNode.textContent = (
+      `Trades ${Number.isFinite(trades) ? Math.trunc(trades) : 0} • `
+      + `Win ${Number.isFinite(winRate) ? fmtNumber(winRate * 100, 1) : "-"}% • `
+      + `PF ${fmtNumber(profitFactor, 2)} • Sharpe ${fmtNumber(sharpe, 2)} • Sortino ${fmtNumber(sortino, 2)}`
+    );
+    autoTradePerformanceNode.classList.remove("pos", "neg");
+    if (Number.isFinite(profitFactor) && profitFactor >= 1.2) autoTradePerformanceNode.classList.add("pos");
+    if (Number.isFinite(profitFactor) && profitFactor > 0 && profitFactor < 1) autoTradePerformanceNode.classList.add("neg");
+  }
+
+  if (autoTradeRegimeNode) {
+    const dominant = String(marketRegime.dominant || "SIDEWAYS").toUpperCase();
+    const counts = marketRegime.counts && typeof marketRegime.counts === "object"
+      ? Object.entries(marketRegime.counts).map(([key, value]) => `${key}:${value}`).join(" ")
+      : "";
+    autoTradeRegimeNode.textContent = `${dominant}${counts ? ` • ${counts}` : ""}`;
+    autoTradeRegimeNode.classList.remove("pos", "neg");
+    if (dominant === "BULL") autoTradeRegimeNode.classList.add("pos");
+    if (dominant === "BEAR" || dominant === "HIGH_VOL") autoTradeRegimeNode.classList.add("neg");
+  }
+
+  if (autoTradeLearningNode) {
+    const learningEnabled = Boolean(selfLearning.enabled);
+    const learningRisk = Number(selfLearning.risk_mult);
+    const learningAiDelta = Number(selfLearning.ai_conf_delta);
+    const learningReason = String(selfLearning.reason || "-");
+    const lstmText = lstmLearningEnabled
+      ? `LSTM ${Number.isFinite(lstmStateCount) ? Math.trunc(lstmStateCount) : 0}/${Number.isFinite(lstmUpdateCount) ? Math.trunc(lstmUpdateCount) : 0}`
+      : "LSTM OFF";
+    const qualityText = entryQualityEnabled
+      ? (
+        `Gate ${Number.isFinite(minEntryScore) ? Math.trunc(minEntryScore) : "-"}`
+        + `/${Number.isFinite(minEntryProbability) ? Math.trunc(minEntryProbability) : "-"}%`
+        + ` RR>=${Number.isFinite(minRiskReward) ? fmtNumber(minRiskReward, 1) : "-"}`
+      )
+      : "Gate OFF";
+    autoTradeLearningNode.textContent = learningEnabled
+      ? `Risk x${fmtNumber(learningRisk, 2)} • AI ${learningAiDelta >= 0 ? "+" : ""}${fmtNumber(learningAiDelta, 0)} • ${lstmText} • ${qualityText} • ${learningReason}`
+      : `${lstmText} • ${qualityText}`;
+    autoTradeLearningNode.classList.remove("pos", "neg");
+    if (learningEnabled && Number.isFinite(learningRisk) && learningRisk > 1) autoTradeLearningNode.classList.add("pos");
+    if (learningEnabled && Number.isFinite(learningRisk) && learningRisk < 1) autoTradeLearningNode.classList.add("neg");
   }
 
   if (autoTradeEventsNode) {

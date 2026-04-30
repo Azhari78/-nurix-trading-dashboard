@@ -4,6 +4,8 @@ from services.exchange import ExchangeGateway
 from services.exchange_stream import ExchangeStreamService
 from services.market import MarketService
 from services.market_state import MarketStateManager
+from services.regime import MarketRegimeDetector
+from services.sentiment import SentimentService
 from services.state import RuntimeState
 from services.trading import TradingService
 
@@ -13,7 +15,9 @@ __all__ = [
     "ExchangeStreamService",
     "MarketService",
     "MarketStateManager",
+    "MarketRegimeDetector",
     "RuntimeState",
+    "SentimentService",
     "Settings",
     "TradingService",
     "load_settings",

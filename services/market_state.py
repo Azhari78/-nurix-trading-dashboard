@@ -241,8 +241,10 @@ class MarketStateManager:
     def get_orderflow_payload(self, symbol: str) -> dict[str, Any]:
         with self._lock:
             orderbook = self._orderbooks.get(symbol, {"bids": [], "asks": []})
-            bids = self._format_levels(orderbook.get("bids", []), self.orderbook_depth)
-            asks = self._format_levels(orderbook.get("asks", []), self.orderbook_depth)
+            raw_bids = orderbook.get("bids", [])
+            raw_asks = orderbook.get("asks", [])
+            bids = self._format_levels(raw_bids, self.orderbook_depth)
+            asks = self._format_levels(raw_asks, self.orderbook_depth)
 
             best_bid = bids[0]["price"] if bids else None
             best_ask = asks[0]["price"] if asks else None
@@ -257,6 +259,61 @@ class MarketStateManager:
             trades = list(self._trades.get(symbol, deque()))
             connected = bool(self._stream_status.get("connected"))
             last_error = self._stream_status.get("last_error")
+
+        top_bids = raw_bids[: self.orderbook_depth]
+        top_asks = raw_asks[: self.orderbook_depth]
+        bid_depth_amount = sum(amount for _, amount in top_bids)
+        ask_depth_amount = sum(amount for _, amount in top_asks)
+        bid_depth_notional = sum(price * amount for price, amount in top_bids)
+        ask_depth_notional = sum(price * amount for price, amount in top_asks)
+        depth_notional_total = bid_depth_notional + ask_depth_notional
+        depth_amount_total = bid_depth_amount + ask_depth_amount
+        depth_imbalance_pct = (
+            (bid_depth_notional - ask_depth_notional) / depth_notional_total * 100.0
+            if depth_notional_total > 0
+            else None
+        )
+        depth_amount_imbalance_pct = (
+            (bid_depth_amount - ask_depth_amount) / depth_amount_total * 100.0
+            if depth_amount_total > 0
+            else None
+        )
+
+        buy_notional = sum(
+            (safe_float(trade.get("cost")) or 0.0)
+            for trade in trades
+            if str(trade.get("side") or "").lower() == "buy"
+        )
+        sell_notional = sum(
+            (safe_float(trade.get("cost")) or 0.0)
+            for trade in trades
+            if str(trade.get("side") or "").lower() == "sell"
+        )
+        trade_notional_total = buy_notional + sell_notional
+        trade_imbalance_pct = (
+            (buy_notional - sell_notional) / trade_notional_total * 100.0
+            if trade_notional_total > 0
+            else None
+        )
+
+        pressure_inputs = [
+            value
+            for value in (depth_imbalance_pct, trade_imbalance_pct)
+            if value is not None
+        ]
+        pressure_score = sum(pressure_inputs) / len(pressure_inputs) if pressure_inputs else 0.0
+        if pressure_score >= 10:
+            pressure_bias = "BUY"
+        elif pressure_score <= -10:
+            pressure_bias = "SELL"
+        else:
+            pressure_bias = "NEUTRAL"
+
+        spread_penalty = max(0.0, spread_pct or 0.0) * 10.0
+        liquidity_score = max(
+            0.0,
+            min(100.0, (depth_notional_total / 10000.0) - spread_penalty),
+        )
 
         if not bids and not asks and not trades:
             if connected:
@@ -276,6 +333,32 @@ class MarketStateManager:
                 "spread": round(spread, 6) if spread is not None else None,
                 "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
                 "mid": round(mid, 6) if mid is not None else None,
+            },
+            "microstructure": {
+                "bid_depth_amount": round(bid_depth_amount, 6),
+                "ask_depth_amount": round(ask_depth_amount, 6),
+                "bid_depth_notional": round(bid_depth_notional, 4),
+                "ask_depth_notional": round(ask_depth_notional, 4),
+                "depth_imbalance_pct": (
+                    round(depth_imbalance_pct, 2)
+                    if depth_imbalance_pct is not None
+                    else None
+                ),
+                "depth_amount_imbalance_pct": (
+                    round(depth_amount_imbalance_pct, 2)
+                    if depth_amount_imbalance_pct is not None
+                    else None
+                ),
+                "buy_trade_notional": round(buy_notional, 4),
+                "sell_trade_notional": round(sell_notional, 4),
+                "trade_imbalance_pct": (
+                    round(trade_imbalance_pct, 2)
+                    if trade_imbalance_pct is not None
+                    else None
+                ),
+                "pressure_score": round(pressure_score, 2),
+                "pressure_bias": pressure_bias,
+                "liquidity_score": round(liquidity_score, 2),
             },
             "trades": trades,
             "error": error,
