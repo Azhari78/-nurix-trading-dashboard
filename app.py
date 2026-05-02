@@ -5,12 +5,14 @@ import csv
 import io
 import json
 import logging
+import os
+import secrets
 import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -129,6 +131,28 @@ class SentimentIngestPayload(BaseModel):
     timestamp: int | None = None
 
 
+def _restore_tokens() -> list[str]:
+    raw_tokens = [
+        os.getenv("RESTORE_DASHBOARD_TOKEN", ""),
+        settings.api_secret,
+        settings.telegram_bot_token,
+    ]
+    return [token.strip() for token in raw_tokens if len(token.strip()) >= 16]
+
+
+def _require_restore_token(request: Request) -> None:
+    tokens = _restore_tokens()
+    if not tokens:
+        raise HTTPException(status_code=503, detail="Dashboard restore token is not configured")
+
+    supplied = request.headers.get("x-restore-token", "").strip()
+    if not supplied:
+        raise HTTPException(status_code=401, detail="Missing restore token")
+
+    if not any(secrets.compare_digest(supplied, token) for token in tokens):
+        raise HTTPException(status_code=403, detail="Invalid restore token")
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", {"request": request})
@@ -205,6 +229,26 @@ def trade_journal_csv(limit: int = 1000) -> Response:
     filename = f"trade_journal_{timestamp}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/api/admin/restore-dashboard-state")
+async def restore_dashboard_state(request: Request) -> dict[str, Any]:
+    _require_restore_token(request)
+    try:
+        payload = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid JSON restore payload") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Restore payload must be a JSON object")
+
+    try:
+        summary = await asyncio.to_thread(trading.restore_runtime_state_payload, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Dashboard state restore failed")
+        raise HTTPException(status_code=500, detail=str(exc)[:240]) from exc
+
+    return {"ok": True, **summary}
 
 
 @app.post("/api/alert-builder/trigger")

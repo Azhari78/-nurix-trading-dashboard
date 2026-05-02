@@ -173,6 +173,17 @@ def parse_env_int(raw_value: str | None, default: int) -> int:
         return default
 
 
+def default_runtime_state_file() -> str:
+    if (
+        os.getenv("RENDER")
+        or os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.path.isdir("/var/data")
+    ):
+        return "/var/data/auto_trade_state.json"
+    return "data/auto_trade_state.json"
+
+
 def parse_ema_pair(
     fast_raw: str | None,
     slow_raw: str | None,
@@ -935,9 +946,9 @@ def load_settings() -> Settings:
         max(parse_env_float(os.getenv("COPY_TRADE_SLIPPAGE_BPS"), 4.0), 0.0),
         50.0,
     )
-    auto_trade_state_file = (os.getenv("AUTO_TRADE_STATE_FILE") or "data/auto_trade_state.json").strip()
+    auto_trade_state_file = (os.getenv("AUTO_TRADE_STATE_FILE") or default_runtime_state_file()).strip()
     if not auto_trade_state_file:
-        auto_trade_state_file = "data/auto_trade_state.json"
+        auto_trade_state_file = default_runtime_state_file()
     auto_trade_state_save_interval_seconds = max(
         parse_env_int(os.getenv("AUTO_TRADE_STATE_SAVE_INTERVAL_SECONDS"), 5),
         1,

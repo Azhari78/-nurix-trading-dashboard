@@ -598,6 +598,41 @@ class TradingService:
                 tmp_path.unlink()
             self.logger.warning("Failed to persist dashboard runtime state to %s: %s", state_path, exc)
 
+    def restore_runtime_state_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._state_persistence_enabled():
+            raise RuntimeError("Runtime state persistence is not configured")
+        if not isinstance(payload, dict):
+            raise ValueError("Runtime state payload must be a JSON object")
+
+        state_path = self._state_file_path
+        tmp_path = state_path.with_name(f"{state_path.name}.restore.tmp")
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=True, separators=(",", ":"), default=str)
+            tmp_path.replace(state_path)
+        except Exception:
+            with suppress(Exception):
+                tmp_path.unlink()
+            raise
+
+        self._last_state_save_at = 0.0
+        self._load_persisted_runtime_state()
+        self.persist_runtime_state(force=True)
+
+        with self.state.auto_trade_lock:
+            positions = len(self.state.auto_trade_positions)
+            journal = len(self.state.auto_trade_journal)
+            daily_pnl = dict(self.state.auto_trade_daily_pnl)
+            realized_pnl = float(self.state.paper_wallet_realized_pnl_usdt)
+        return {
+            "state_file": str(state_path),
+            "positions": positions,
+            "journal_count": journal,
+            "daily_pnl": daily_pnl,
+            "realized_pnl_usdt": round(realized_pnl, 6),
+        }
+
     @staticmethod
     def utc_day_key() -> str:
         return time.strftime("%Y-%m-%d", time.gmtime())
