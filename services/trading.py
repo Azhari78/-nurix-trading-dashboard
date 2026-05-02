@@ -53,8 +53,10 @@ class TradingService:
                 name,
                 {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
             )
-        self._state_file_path = Path(settings.auto_trade_state_file).expanduser()
         self._legacy_state_file_path = Path("data/auto_trade_state.json").expanduser()
+        self._state_file_path = self._resolve_state_file_path(
+            Path(settings.auto_trade_state_file).expanduser()
+        )
         self._state_save_interval_seconds = max(
             1,
             int(settings.auto_trade_state_save_interval_seconds),
@@ -66,6 +68,37 @@ class TradingService:
 
     def _state_persistence_enabled(self) -> bool:
         return bool(str(self.settings.auto_trade_state_file or "").strip())
+
+    def _can_write_state_file(self, state_path: Path) -> bool:
+        probe_path = state_path.parent / f".{state_path.name}.write-test"
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            with probe_path.open("w", encoding="utf-8") as handle:
+                handle.write("ok")
+            return True
+        except OSError as exc:
+            self.logger.warning("State path %s is not writable: %s", state_path.parent, exc)
+            return False
+        finally:
+            with suppress(Exception):
+                probe_path.unlink()
+
+    def _resolve_state_file_path(self, preferred_path: Path) -> Path:
+        local_fallback = self._legacy_state_file_path
+        candidates = [preferred_path]
+        if local_fallback != preferred_path:
+            candidates.append(local_fallback)
+
+        for candidate in candidates:
+            if self._can_write_state_file(candidate):
+                if candidate != preferred_path:
+                    self.logger.warning(
+                        "Using fallback dashboard state file %s because %s is not writable",
+                        candidate,
+                        preferred_path,
+                    )
+                return candidate
+        return preferred_path
 
     @staticmethod
     def _restore_event_deque(target: deque[dict[str, Any]], rows: Any) -> int:
