@@ -152,6 +152,11 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
+    return health()
+
+
 @app.get("/api/trade-journal.csv")
 def trade_journal_csv(limit: int = 1000) -> Response:
     safe_limit = max(1, min(int(limit), 5000))
