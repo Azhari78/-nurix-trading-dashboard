@@ -7,5 +7,7 @@ __pycache__/
 .vscode/
 .DS_Store
 
-# Runtime persistence file for paper auto-trade state.
+# Runtime persistence file for local dashboard state.
 data/auto_trade_state.json
+data/recovered_*.csv
+data/recovered_*.json

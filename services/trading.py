@@ -54,6 +54,7 @@ class TradingService:
                 {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
             )
         self._state_file_path = Path(settings.auto_trade_state_file).expanduser()
+        self._legacy_state_file_path = Path("data/auto_trade_state.json").expanduser()
         self._state_save_interval_seconds = max(
             1,
             int(settings.auto_trade_state_save_interval_seconds),
@@ -64,7 +65,25 @@ class TradingService:
         self._load_persisted_runtime_state()
 
     def _state_persistence_enabled(self) -> bool:
-        return bool(self.settings.paper_trading and self.settings.paper_wallet_enabled)
+        return bool(str(self.settings.auto_trade_state_file or "").strip())
+
+    @staticmethod
+    def _restore_event_deque(target: deque[dict[str, Any]], rows: Any) -> int:
+        target.clear()
+        max_id = 0
+        if not isinstance(rows, list):
+            return max_id
+
+        maxlen = target.maxlen or len(rows)
+        for row in rows[-maxlen:]:
+            if not isinstance(row, dict):
+                continue
+            restored = dict(row)
+            target.append(restored)
+            row_id = safe_float(restored.get("id"))
+            if row_id is not None:
+                max_id = max(max_id, int(row_id))
+        return max_id
 
     @staticmethod
     def _float_map(raw_map: Any, *, uppercase_keys: bool = True) -> dict[str, float]:
@@ -169,18 +188,26 @@ class TradingService:
             return
 
         state_path = self._state_file_path
-        if not state_path.is_file():
+        load_path = state_path if state_path.is_file() else None
+        if (
+            load_path is None
+            and self._legacy_state_file_path != state_path
+            and self._legacy_state_file_path.is_file()
+        ):
+            load_path = self._legacy_state_file_path
+
+        if load_path is None:
             return
 
         try:
-            with state_path.open("r", encoding="utf-8") as handle:
+            with load_path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except Exception as exc:  # noqa: BLE001
-            self.logger.warning("Could not load persisted auto-trade state from %s: %s", state_path, exc)
+            self.logger.warning("Could not load persisted dashboard state from %s: %s", load_path, exc)
             return
 
         if not isinstance(payload, dict):
-            self.logger.warning("Ignoring persisted auto-trade state in %s: invalid payload", state_path)
+            self.logger.warning("Ignoring persisted dashboard state in %s: invalid payload", load_path)
             return
 
         positions_raw = payload.get("auto_trade_positions")
@@ -293,6 +320,77 @@ class TradingService:
                 for row in journal_rows[-self.state.auto_trade_journal.maxlen :]:
                     if isinstance(row, dict):
                         self.state.auto_trade_journal.append(dict(row))
+            events_max_id = self._restore_event_deque(
+                self.state.auto_trade_events,
+                payload.get("auto_trade_events"),
+            )
+            self.state.auto_trade_counter = max(
+                events_max_id,
+                int(safe_float(payload.get("auto_trade_counter")) or 0),
+            )
+            self.state.auto_trade_last_reason = str(
+                payload.get("auto_trade_last_reason")
+                or self.state.auto_trade_last_reason
+            )
+            self.state.auto_trade_last_daily_recap_day = (
+                str(payload.get("auto_trade_last_daily_recap_day")).strip()
+                if payload.get("auto_trade_last_daily_recap_day") is not None
+                else None
+            ) or None
+            self.state.auto_trade_adaptive_profile = str(
+                payload.get("auto_trade_adaptive_profile")
+                or self.state.auto_trade_adaptive_profile
+            )
+            self.state.auto_trade_adaptive_reason = str(
+                payload.get("auto_trade_adaptive_reason")
+                or self.state.auto_trade_adaptive_reason
+            )
+            self.state.auto_trade_adaptive_ai_min_confidence = int(
+                safe_float(payload.get("auto_trade_adaptive_ai_min_confidence")) or 0
+            )
+            self.state.auto_trade_adaptive_risk_multiplier = float(
+                safe_float(payload.get("auto_trade_adaptive_risk_multiplier")) or 1.0
+            )
+            self.state.auto_trade_adaptive_cooldown_multiplier = float(
+                safe_float(payload.get("auto_trade_adaptive_cooldown_multiplier")) or 1.0
+            )
+            market_regime_summary = payload.get("market_regime_summary")
+            if isinstance(market_regime_summary, dict):
+                self.state.market_regime_summary = dict(market_regime_summary)
+
+            copy_trade_events_max_id = self._restore_event_deque(
+                self.state.copy_trade_events,
+                payload.get("copy_trade_events"),
+            )
+            self.state.copy_trade_counter = max(
+                copy_trade_events_max_id,
+                int(safe_float(payload.get("copy_trade_counter")) or 0),
+            )
+            copy_trade_positions = payload.get("copy_trade_positions")
+            if isinstance(copy_trade_positions, dict):
+                self.state.copy_trade_positions = {
+                    str(follower): {
+                        str(symbol).upper(): dict(position)
+                        for symbol, position in positions.items()
+                        if str(symbol).strip() and isinstance(position, dict)
+                    }
+                    for follower, positions in copy_trade_positions.items()
+                    if str(follower).strip() and isinstance(positions, dict)
+                }
+            copy_trade_stats = payload.get("copy_trade_stats")
+            if isinstance(copy_trade_stats, dict):
+                self.state.copy_trade_stats = {
+                    str(follower): dict(stats)
+                    for follower, stats in copy_trade_stats.items()
+                    if str(follower).strip() and isinstance(stats, dict)
+                }
+            for follower in self._copy_followers:
+                follower_name = str(follower["name"])
+                self.state.copy_trade_positions.setdefault(follower_name, {})
+                self.state.copy_trade_stats.setdefault(
+                    follower_name,
+                    {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
+                )
 
         with self.state.wallet_lock:
             paper_wallet = payload.get("paper_wallet")
@@ -322,11 +420,39 @@ class TradingService:
                 )
                 self.state.wallet_cache["updated_at"] = 0.0
 
+        with self.state.alert_lock:
+            alert_max_id = self._restore_event_deque(
+                self.state.alert_events,
+                payload.get("alert_events"),
+            )
+            self.state.alert_counter = max(
+                alert_max_id,
+                int(safe_float(payload.get("alert_counter")) or 0),
+            )
+
+        with self.state.sentiment_lock:
+            sentiment_max_id = self._restore_event_deque(
+                self.state.sentiment_events,
+                payload.get("sentiment_events"),
+            )
+            self.state.sentiment_counter = max(
+                sentiment_max_id,
+                int(safe_float(payload.get("sentiment_counter")) or 0),
+            )
+            sentiment_by_symbol = payload.get("sentiment_by_symbol")
+            if isinstance(sentiment_by_symbol, dict):
+                self.state.sentiment_by_symbol = {
+                    str(symbol).upper(): dict(values)
+                    for symbol, values in sentiment_by_symbol.items()
+                    if str(symbol).strip() and isinstance(values, dict)
+                }
+
         self.logger.info(
-            "Loaded persisted auto-trade state from %s (positions=%s, journal=%s)",
-            state_path,
+            "Loaded persisted dashboard state from %s (positions=%s, journal=%s, alerts=%s)",
+            load_path,
             len(restored_positions),
             len(self.state.auto_trade_journal),
+            len(self.state.alert_events),
         )
 
     def _build_runtime_state_payload(self) -> dict[str, Any]:
@@ -334,8 +460,10 @@ class TradingService:
             self._prune_daily_pnl_history_locked(self.utc_day_key())
             self._clear_disabled_forward_guardrail_halt_locked()
             payload: dict[str, Any] = {
-                "version": 1,
+                "version": 2,
                 "saved_at": int(time.time()),
+                "auto_trade_counter": int(self.state.auto_trade_counter),
+                "auto_trade_events": list(self.state.auto_trade_events),
                 "auto_trade_positions": {
                     str(symbol): dict(position)
                     for symbol, position in self.state.auto_trade_positions.items()
@@ -361,6 +489,8 @@ class TradingService:
                     self.state.auto_trade_guardrail_halt_sample_key
                 ),
                 "auto_trade_last_convert_at": float(self.state.auto_trade_last_convert_at),
+                "auto_trade_last_reason": self.state.auto_trade_last_reason,
+                "auto_trade_last_daily_recap_day": self.state.auto_trade_last_daily_recap_day,
                 "auto_trade_consecutive_losses": int(self.state.auto_trade_consecutive_losses),
                 "auto_trade_consecutive_wins": int(self.state.auto_trade_consecutive_wins),
                 "auto_trade_profit_lock_day": self.state.auto_trade_profit_lock_day,
@@ -391,6 +521,34 @@ class TradingService:
                     if isinstance(values, dict)
                 },
                 "auto_trade_journal": list(self.state.auto_trade_journal),
+                "auto_trade_adaptive_profile": self.state.auto_trade_adaptive_profile,
+                "auto_trade_adaptive_reason": self.state.auto_trade_adaptive_reason,
+                "auto_trade_adaptive_ai_min_confidence": int(
+                    self.state.auto_trade_adaptive_ai_min_confidence
+                ),
+                "auto_trade_adaptive_risk_multiplier": float(
+                    self.state.auto_trade_adaptive_risk_multiplier
+                ),
+                "auto_trade_adaptive_cooldown_multiplier": float(
+                    self.state.auto_trade_adaptive_cooldown_multiplier
+                ),
+                "market_regime_summary": dict(self.state.market_regime_summary),
+                "copy_trade_counter": int(self.state.copy_trade_counter),
+                "copy_trade_events": list(self.state.copy_trade_events),
+                "copy_trade_positions": {
+                    str(follower): {
+                        str(symbol): dict(position)
+                        for symbol, position in positions.items()
+                        if isinstance(position, dict)
+                    }
+                    for follower, positions in self.state.copy_trade_positions.items()
+                    if isinstance(positions, dict)
+                },
+                "copy_trade_stats": {
+                    str(follower): dict(stats)
+                    for follower, stats in self.state.copy_trade_stats.items()
+                    if isinstance(stats, dict)
+                },
             }
 
         with self.state.wallet_lock:
@@ -401,6 +559,19 @@ class TradingService:
                 "realized_pnl_usdt": float(self.state.paper_wallet_realized_pnl_usdt),
                 "day_key": self.state.wallet_day_key,
                 "day_start_total_usdt": self.state.wallet_day_start_total_usdt,
+            }
+
+        with self.state.alert_lock:
+            payload["alert_counter"] = int(self.state.alert_counter)
+            payload["alert_events"] = list(self.state.alert_events)
+
+        with self.state.sentiment_lock:
+            payload["sentiment_counter"] = int(self.state.sentiment_counter)
+            payload["sentiment_events"] = list(self.state.sentiment_events)
+            payload["sentiment_by_symbol"] = {
+                str(symbol): dict(values)
+                for symbol, values in self.state.sentiment_by_symbol.items()
+                if isinstance(values, dict)
             }
 
         return payload
@@ -419,13 +590,13 @@ class TradingService:
         try:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             with tmp_path.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=True)
+                json.dump(payload, handle, ensure_ascii=True, separators=(",", ":"), default=str)
             tmp_path.replace(state_path)
             self._last_state_save_at = now
         except Exception as exc:  # noqa: BLE001
             with suppress(Exception):
                 tmp_path.unlink()
-            self.logger.warning("Failed to persist auto-trade runtime state to %s: %s", state_path, exc)
+            self.logger.warning("Failed to persist dashboard runtime state to %s: %s", state_path, exc)
 
     @staticmethod
     def utc_day_key() -> str:

@@ -234,6 +234,7 @@ def alert_builder_trigger(payload: AlertBuilderTriggerPayload) -> dict[str, Any]
         severity=severity,
         meta=merged_meta,
     )
+    trading.persist_runtime_state(force=True)
     return {"ok": True, "symbol": symbol, "type": alert_type}
 
 
@@ -253,6 +254,7 @@ def sentiment_ingest(payload: SentimentIngestPayload) -> dict[str, Any]:
         weight=payload.weight,
         timestamp=payload.timestamp,
     )
+    trading.persist_runtime_state(force=True)
     return {
         "ok": True,
         "event": event,

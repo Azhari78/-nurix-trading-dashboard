@@ -6,6 +6,11 @@ services:
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     autoDeploy: true
+    # Persistent disk keeps dashboard runtime data across deploys/restarts.
+    disk:
+      name: nurix-dashboard-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
@@ -36,7 +41,7 @@ services:
       - key: PAPER_WALLET_START_USDT
         value: "10000"
       - key: AUTO_TRADE_STATE_FILE
-        value: "data/auto_trade_state.json"
+        value: "/var/data/auto_trade_state.json"
       - key: AUTO_TRADE_STATE_SAVE_INTERVAL_SECONDS
         value: "5"
       - key: AUTO_TRADE_SYMBOLS
