@@ -461,8 +461,18 @@ class MarketService:
             "timeframes": frame_count,
         }
 
-    def build_market_rows(self) -> list[dict[str, Any]]:
-        effective_symbols = self._effective_symbols()
+    def build_market_rows(
+        self,
+        symbols: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        if symbols is None:
+            effective_symbols = self._effective_symbols()
+        else:
+            configured_symbols = set(self.settings.symbols)
+            effective_symbols = [
+                symbol for symbol in symbols if symbol in configured_symbols
+            ] or [self.settings.default_symbol]
+
         tickers = self.market_state.get_tickers(effective_symbols)
         rows: list[dict[str, Any]] = []
 
@@ -1451,7 +1461,12 @@ class MarketService:
 
     def run_background_engine_cycle(self) -> None:
         with self._engine_cycle_lock:
-            market_rows = self.build_market_rows()
+            engine_symbols = (
+                self.settings.auto_trade_symbols
+                if self.settings.auto_trade_enabled
+                else [self.settings.default_symbol]
+            )
+            market_rows = self.build_market_rows(engine_symbols)
             wallet = self.build_wallet_payload(market_rows)
             self.alerts.update_alert_state(market_rows)
             self.trading.run_auto_trading(market_rows, wallet)

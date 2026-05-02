@@ -70,6 +70,8 @@ def _hurst_exponent(close: pd.Series, max_lag: int = 20) -> float:
 
 
 def add_indicators(df: pd.DataFrame, extra_ema_spans: tuple[int, ...] = ()) -> pd.DataFrame:
+    df = df.copy()
+
     close = pd.to_numeric(df["close"], errors="coerce")
     high = pd.to_numeric(df["high"], errors="coerce")
     low = pd.to_numeric(df["low"], errors="coerce")
