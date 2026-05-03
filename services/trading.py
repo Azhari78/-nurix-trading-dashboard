@@ -51,7 +51,7 @@ class TradingService:
             self.state.copy_trade_positions.setdefault(name, {})
             self.state.copy_trade_stats.setdefault(
                 name,
-                {"trades": 0, "wins": 0, "losses": 0, "pnl_usd": 0.0},
+                {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
             )
         self._legacy_state_file_path = Path("data/auto_trade_state.json").expanduser()
         self._state_file_path = self._resolve_state_file_path(
@@ -211,7 +211,7 @@ class TradingService:
         return [
             {
                 "day_key": day_key,
-                "pnl_usd": round(value, 4),
+                "pnl_usdt": round(value, 4),
             }
             for _, day_key, value in rows
         ]
@@ -307,12 +307,12 @@ class TradingService:
             self.state.auto_trade_profit_lock_reason = str(
                 payload.get("auto_trade_profit_lock_reason") or ""
             )
-            self.state.auto_trade_daily_peak_pnl_usd = float(
-                safe_float(payload.get("auto_trade_daily_peak_pnl_usd")) or 0.0
+            self.state.auto_trade_daily_peak_pnl_usdt = float(
+                safe_float(payload.get("auto_trade_daily_peak_pnl_usdt")) or 0.0
             )
-            self.state.auto_trade_peak_equity_usd = max(
+            self.state.auto_trade_peak_equity_usdt = max(
                 0.0,
-                float(safe_float(payload.get("auto_trade_peak_equity_usd")) or 0.0),
+                float(safe_float(payload.get("auto_trade_peak_equity_usdt")) or 0.0),
             )
             self.state.auto_trade_current_drawdown_pct = max(
                 0.0,
@@ -422,7 +422,7 @@ class TradingService:
                 self.state.copy_trade_positions.setdefault(follower_name, {})
                 self.state.copy_trade_stats.setdefault(
                     follower_name,
-                    {"trades": 0, "wins": 0, "losses": 0, "pnl_usd": 0.0},
+                    {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
                 )
 
         with self.state.wallet_lock:
@@ -432,21 +432,21 @@ class TradingService:
                 if restored_positions:
                     initialized = True
                 self.state.paper_wallet_initialized = initialized
-                self.state.paper_wallet_free_usd = max(
+                self.state.paper_wallet_free_usdt = max(
                     0.0,
-                    float(safe_float(paper_wallet.get("free_usd")) or 0.0),
+                    float(safe_float(paper_wallet.get("free_usdt")) or 0.0),
                 )
-                self.state.paper_wallet_used_usd = max(
+                self.state.paper_wallet_used_usdt = max(
                     0.0,
-                    float(safe_float(paper_wallet.get("used_usd")) or 0.0),
+                    float(safe_float(paper_wallet.get("used_usdt")) or 0.0),
                 )
-                self.state.paper_wallet_realized_pnl_usd = float(
-                    safe_float(paper_wallet.get("realized_pnl_usd")) or 0.0
+                self.state.paper_wallet_realized_pnl_usdt = float(
+                    safe_float(paper_wallet.get("realized_pnl_usdt")) or 0.0
                 )
                 day_key = str(paper_wallet.get("day_key") or "").strip()
                 self.state.wallet_day_key = day_key or None
-                day_start_total = safe_float(paper_wallet.get("day_start_total_usd"))
-                self.state.wallet_day_start_total_usd = (
+                day_start_total = safe_float(paper_wallet.get("day_start_total_usdt"))
+                self.state.wallet_day_start_total_usdt = (
                     float(day_start_total)
                     if day_start_total is not None and day_start_total >= 0
                     else None
@@ -529,10 +529,10 @@ class TradingService:
                 "auto_trade_profit_lock_day": self.state.auto_trade_profit_lock_day,
                 "auto_trade_profit_lock_active": bool(self.state.auto_trade_profit_lock_active),
                 "auto_trade_profit_lock_reason": self.state.auto_trade_profit_lock_reason,
-                "auto_trade_daily_peak_pnl_usd": float(
-                    self.state.auto_trade_daily_peak_pnl_usd
+                "auto_trade_daily_peak_pnl_usdt": float(
+                    self.state.auto_trade_daily_peak_pnl_usdt
                 ),
-                "auto_trade_peak_equity_usd": float(self.state.auto_trade_peak_equity_usd),
+                "auto_trade_peak_equity_usdt": float(self.state.auto_trade_peak_equity_usdt),
                 "auto_trade_current_drawdown_pct": float(
                     self.state.auto_trade_current_drawdown_pct
                 ),
@@ -587,11 +587,11 @@ class TradingService:
         with self.state.wallet_lock:
             payload["paper_wallet"] = {
                 "initialized": bool(self.state.paper_wallet_initialized),
-                "free_usd": float(self.state.paper_wallet_free_usd),
-                "used_usd": float(self.state.paper_wallet_used_usd),
-                "realized_pnl_usd": float(self.state.paper_wallet_realized_pnl_usd),
+                "free_usdt": float(self.state.paper_wallet_free_usdt),
+                "used_usdt": float(self.state.paper_wallet_used_usdt),
+                "realized_pnl_usdt": float(self.state.paper_wallet_realized_pnl_usdt),
                 "day_key": self.state.wallet_day_key,
-                "day_start_total_usd": self.state.wallet_day_start_total_usd,
+                "day_start_total_usdt": self.state.wallet_day_start_total_usdt,
             }
 
         with self.state.alert_lock:
@@ -657,13 +657,13 @@ class TradingService:
             positions = len(self.state.auto_trade_positions)
             journal = len(self.state.auto_trade_journal)
             daily_pnl = dict(self.state.auto_trade_daily_pnl)
-            realized_pnl = float(self.state.paper_wallet_realized_pnl_usd)
+            realized_pnl = float(self.state.paper_wallet_realized_pnl_usdt)
         return {
             "state_file": str(state_path),
             "positions": positions,
             "journal_count": journal,
             "daily_pnl": daily_pnl,
-            "realized_pnl_usd": round(realized_pnl, 6),
+            "realized_pnl_usdt": round(realized_pnl, 6),
         }
 
     @staticmethod
@@ -749,7 +749,7 @@ class TradingService:
                     symbol=self.settings.default_symbol,
                     alert_type="auto_trade_symbol_filtered",
                     title="Auto-trade symbol whitelist filtered",
-                    message=f"Unsupported by stock data provider: {', '.join(invalid[:6])}",
+                    message=f"Unsupported on exchange: {', '.join(invalid[:6])}",
                     severity="medium",
                     meta={
                         "event": "SYMBOL_FILTER",
@@ -768,7 +768,7 @@ class TradingService:
         return ((current_price - entry_price) / entry_price) * 100
 
     @staticmethod
-    def _fmt_usd(value: float, *, signed: bool = False) -> str:
+    def _fmt_usdt(value: float, *, signed: bool = False) -> str:
         number = float(value)
         abs_number = abs(number)
         if abs_number < 1e-9:
@@ -789,9 +789,9 @@ class TradingService:
         event_type: str,
         side: str,
         reason: str,
-        pnl_usd: float | None,
+        pnl_usdt: float | None,
         pnl_pct: float | None,
-        notional_usd: float | None,
+        notional_usdt: float | None,
         price: float | None,
         amount: float | None,
         metadata: dict[str, Any] | None = None,
@@ -803,28 +803,28 @@ class TradingService:
                 "event_type": event_type,
                 "side": side,
                 "reason": reason,
-                "pnl_usd": round(pnl_usd, 4) if pnl_usd is not None else None,
+                "pnl_usdt": round(pnl_usdt, 4) if pnl_usdt is not None else None,
                 "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
-                "notional_usd": round(notional_usd, 4) if notional_usd is not None else None,
+                "notional_usdt": round(notional_usdt, 4) if notional_usdt is not None else None,
                 "price": round(price, 6) if price is not None else None,
                 "amount": round(amount, 8) if amount is not None else None,
                 "metadata": metadata or {},
             }
         )
 
-    def _update_symbol_stats(self, symbol: str, pnl_usd: float) -> None:
+    def _update_symbol_stats(self, symbol: str, pnl_usdt: float) -> None:
         stats = self.state.auto_trade_stats_by_symbol.setdefault(
             symbol,
             {
                 "trades": 0,
                 "wins": 0,
                 "losses": 0,
-                "pnl_usd": 0.0,
+                "pnl_usdt": 0.0,
             },
         )
         stats["trades"] += 1
-        stats["pnl_usd"] += pnl_usd
-        if pnl_usd >= 0:
+        stats["pnl_usdt"] += pnl_usdt
+        if pnl_usdt >= 0:
             stats["wins"] += 1
             self.state.auto_trade_consecutive_wins += 1
             self.state.auto_trade_consecutive_losses = 0
@@ -845,7 +845,7 @@ class TradingService:
         side: str,
         amount: float,
         price: float,
-        pnl_usd: float | None = None,
+        pnl_usdt: float | None = None,
         reason: str = "",
     ) -> None:
         self.state.copy_trade_counter += 1
@@ -859,7 +859,7 @@ class TradingService:
                 "side": side,
                 "amount": round(amount, 8),
                 "price": round(price, 6),
-                "pnl_usd": round(pnl_usd, 4) if pnl_usd is not None else None,
+                "pnl_usdt": round(pnl_usdt, 4) if pnl_usdt is not None else None,
                 "reason": reason,
             }
         )
@@ -881,7 +881,7 @@ class TradingService:
         order_side: str,
         entry_price: float,
         amount: float,
-        notional_usd: float,
+        notional_usdt: float,
     ) -> None:
         if not self._copy_trade_is_enabled():
             return
@@ -891,14 +891,14 @@ class TradingService:
             multiplier = float(follower["multiplier"])
             follower_amount = amount * multiplier
             follower_price = self._copy_trade_price_with_slippage(entry_price, order_side)
-            follower_notional = notional_usd * multiplier
+            follower_notional = notional_usdt * multiplier
 
             follower_positions = self.state.copy_trade_positions.setdefault(follower_name, {})
             follower_positions[symbol] = {
                 "side": position_side,
                 "entry_price": follower_price,
                 "amount": follower_amount,
-                "notional_usd": follower_notional,
+                "notional_usdt": follower_notional,
                 "opened_at": int(time.time()),
             }
             self._copy_trade_event(
@@ -940,7 +940,7 @@ class TradingService:
 
             follower_entry = safe_float(follower_position.get("entry_price")) or exit_price
             follower_exit = self._copy_trade_price_with_slippage(exit_price, order_side)
-            follower_pnl = self._pnl_usd(position_side, follower_entry, follower_exit, close_amount)
+            follower_pnl = self._pnl_usdt(position_side, follower_entry, follower_exit, close_amount)
 
             remaining_amount = max(0.0, open_amount - close_amount)
             if remaining_amount <= 0:
@@ -950,9 +950,9 @@ class TradingService:
 
             stats = self.state.copy_trade_stats.setdefault(
                 follower_name,
-                {"trades": 0, "wins": 0, "losses": 0, "pnl_usd": 0.0},
+                {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
             )
-            stats["pnl_usd"] += follower_pnl
+            stats["pnl_usdt"] += follower_pnl
             if not partial or remaining_amount <= 0:
                 stats["trades"] += 1
                 if follower_pnl >= 0:
@@ -967,7 +967,7 @@ class TradingService:
                 side=position_side,
                 amount=close_amount,
                 price=follower_exit,
-                pnl_usd=follower_pnl,
+                pnl_usdt=follower_pnl,
                 reason=reason,
             )
 
@@ -1080,7 +1080,7 @@ class TradingService:
             for row in self.state.auto_trade_journal
             if row.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
             and int(row.get("timestamp") or 0) >= minimum_ts
-            and row.get("pnl_usd") is not None
+            and row.get("pnl_usdt") is not None
         ]
 
     def _realized_trades_for_day(self, day_key: str) -> list[dict[str, Any]]:
@@ -1089,7 +1089,7 @@ class TradingService:
             for row in self.state.auto_trade_journal
             if row.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
             and self.utc_day_key_from_timestamp(int(row.get("timestamp") or 0)) == day_key
-            and row.get("pnl_usd") is not None
+            and row.get("pnl_usdt") is not None
         ]
 
     def _maybe_send_daily_recap(self, now_ts: float, current_day_key: str) -> None:
@@ -1098,7 +1098,7 @@ class TradingService:
             return
 
         realized = self._realized_trades_for_day(recap_day)
-        pnl_values = [safe_float(row.get("pnl_usd")) or 0.0 for row in realized]
+        pnl_values = [safe_float(row.get("pnl_usdt")) or 0.0 for row in realized]
         trade_count = len(pnl_values)
         wins = sum(1 for pnl in pnl_values if pnl >= 0)
         losses = trade_count - wins
@@ -1120,7 +1120,7 @@ class TradingService:
         pnl_by_symbol: dict[str, float] = {}
         for row in realized:
             symbol = str(row.get("symbol") or "-")
-            pnl_by_symbol[symbol] = pnl_by_symbol.get(symbol, 0.0) + (safe_float(row.get("pnl_usd")) or 0.0)
+            pnl_by_symbol[symbol] = pnl_by_symbol.get(symbol, 0.0) + (safe_float(row.get("pnl_usdt")) or 0.0)
 
         if pnl_by_symbol:
             top_symbol, top_symbol_pnl = max(pnl_by_symbol.items(), key=lambda item: item[1])
@@ -1135,10 +1135,10 @@ class TradingService:
             return
 
         message = (
-            f"UTC {recap_day} • PnL {self._fmt_usd(daily_pnl, signed=True)} USD • "
+            f"UTC {recap_day} • PnL {self._fmt_usdt(daily_pnl, signed=True)} USDT • "
             f"Trades {trade_count} • Win {win_rate_pct:.1f}% ({wins}W/{losses}L) • "
-            f"Avg Win {self._fmt_usd(avg_win)} • Avg Loss {self._fmt_usd(avg_loss)} • "
-            f"Top {top_symbol} ({self._fmt_usd(top_symbol_pnl, signed=True)}) • Halt: {halt_text}"
+            f"Avg Win {self._fmt_usdt(avg_win)} • Avg Loss {self._fmt_usdt(avg_loss)} • "
+            f"Top {top_symbol} ({self._fmt_usdt(top_symbol_pnl, signed=True)}) • Halt: {halt_text}"
         )
 
         self.alerts.emit_alert(
@@ -1150,15 +1150,15 @@ class TradingService:
             meta={
                 "event": "DAILY_RECAP",
                 "day_key": recap_day,
-                "pnl_usd": round(daily_pnl, 4),
+                "pnl_usdt": round(daily_pnl, 4),
                 "trades": trade_count,
                 "wins": wins,
                 "losses": losses,
                 "win_rate_pct": round(win_rate_pct, 2),
-                "avg_win_usd": round(avg_win, 4),
-                "avg_loss_usd": round(avg_loss, 4),
+                "avg_win_usdt": round(avg_win, 4),
+                "avg_loss_usdt": round(avg_loss, 4),
                 "top_symbol": top_symbol,
-                "top_symbol_pnl_usd": round(top_symbol_pnl, 4),
+                "top_symbol_pnl_usdt": round(top_symbol_pnl, 4),
                 "halt_reason": halt_text,
                 "generated_day_key": current_day_key,
             },
@@ -1179,15 +1179,15 @@ class TradingService:
             self.state.auto_trade_guardrail_halt_sample_key = ""
             return 1.0, ""
 
-        wins = sum(1 for row in realized if (safe_float(row.get("pnl_usd")) or 0.0) >= 0)
+        wins = sum(1 for row in realized if (safe_float(row.get("pnl_usdt")) or 0.0) >= 0)
         trade_count = len(realized)
         win_rate = wins / trade_count if trade_count > 0 else 0.0
-        avg_pnl = sum(safe_float(row.get("pnl_usd")) or 0.0 for row in realized) / trade_count
+        avg_pnl = sum(safe_float(row.get("pnl_usdt")) or 0.0 for row in realized) / trade_count
         latest_realized_ts = max(int(row.get("timestamp") or 0) for row in realized)
         halt_sample_key = f"{trade_count}:{latest_realized_ts}"
 
         baseline_win_rate = self.settings.auto_trade_forward_baseline_win_rate
-        baseline_avg_pnl = self.settings.auto_trade_forward_baseline_avg_pnl_usd
+        baseline_avg_pnl = self.settings.auto_trade_forward_baseline_avg_pnl_usdt
         underperform = (
             win_rate < baseline_win_rate
             or avg_pnl < baseline_avg_pnl
@@ -1316,7 +1316,7 @@ class TradingService:
             item
             for item in self.state.auto_trade_journal
             if item.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
-            and safe_float(item.get("pnl_usd")) is not None
+            and safe_float(item.get("pnl_usdt")) is not None
         ]
         symbol_realized = [
             item
@@ -1332,7 +1332,7 @@ class TradingService:
                 "min_trades": self.settings.auto_trade_kelly_min_trades,
             }
 
-        pnl_values = [float(safe_float(item.get("pnl_usd")) or 0.0) for item in sample[-80:]]
+        pnl_values = [float(safe_float(item.get("pnl_usdt")) or 0.0) for item in sample[-80:]]
         wins = [value for value in pnl_values if value > 0]
         losses = [abs(value) for value in pnl_values if value < 0]
         win_rate = len(wins) / len(pnl_values) if pnl_values else 0.0
@@ -1365,23 +1365,23 @@ class TradingService:
         if not self.settings.auto_trade_max_drawdown_enabled:
             return False, ""
 
-        equity = safe_float((wallet_payload or {}).get("total_usd_estimate"))
+        equity = safe_float((wallet_payload or {}).get("total_usdt_estimate"))
         if equity is None or equity <= 0:
             if self.settings.paper_trading and self.settings.paper_wallet_enabled:
                 with self.state.wallet_lock:
                     equity = (
-                        float(self.state.paper_wallet_free_usd)
-                        + float(self.state.paper_wallet_used_usd)
+                        float(self.state.paper_wallet_free_usdt)
+                        + float(self.state.paper_wallet_used_usdt)
                     )
             if equity is None or equity <= 0:
                 return False, ""
 
-        if self.state.auto_trade_peak_equity_usd <= 0:
-            self.state.auto_trade_peak_equity_usd = float(equity)
-        if equity > self.state.auto_trade_peak_equity_usd:
-            self.state.auto_trade_peak_equity_usd = float(equity)
+        if self.state.auto_trade_peak_equity_usdt <= 0:
+            self.state.auto_trade_peak_equity_usdt = float(equity)
+        if equity > self.state.auto_trade_peak_equity_usdt:
+            self.state.auto_trade_peak_equity_usdt = float(equity)
 
-        peak = max(1e-9, self.state.auto_trade_peak_equity_usd)
+        peak = max(1e-9, self.state.auto_trade_peak_equity_usdt)
         drawdown_pct = max(0.0, (peak - float(equity)) / peak * 100.0)
         self.state.auto_trade_current_drawdown_pct = drawdown_pct
         self.state.auto_trade_max_drawdown_pct = max(
@@ -1475,14 +1475,14 @@ class TradingService:
         self,
         wallet_payload: dict[str, Any] | None,
     ) -> tuple[float, str]:
-        absolute_limit = max(0.0, float(self.settings.max_daily_loss_usd))
+        absolute_limit = max(0.0, float(self.settings.max_daily_loss_usdt))
         pct_limit = 0.0
         pct_basis = 0.0
         if self.settings.auto_trade_max_daily_loss_pct > 0:
-            day_start = safe_float((wallet_payload or {}).get("day_start_total_usd"))
+            day_start = safe_float((wallet_payload or {}).get("day_start_total_usdt"))
             if day_start is None or day_start <= 0:
                 with self.state.wallet_lock:
-                    day_start = self.state.wallet_day_start_total_usd
+                    day_start = self.state.wallet_day_start_total_usdt
             if day_start is not None and day_start > 0:
                 pct_basis = float(day_start)
                 pct_limit = day_start * (self.settings.auto_trade_max_daily_loss_pct / 100.0)
@@ -1496,7 +1496,7 @@ class TradingService:
                         f"of day equity {pct_basis:.2f}"
                     ),
                 )
-            return absolute_limit, "absolute USD cap"
+            return absolute_limit, "absolute USDT cap"
         if pct_limit > 0:
             return (
                 pct_limit,
@@ -1506,10 +1506,10 @@ class TradingService:
                 ),
             )
         if absolute_limit > 0:
-            return absolute_limit, "absolute USD cap"
+            return absolute_limit, "absolute USDT cap"
         return 0.0, "disabled"
 
-    def _daily_loss_limit_usd(self, wallet_payload: dict[str, Any] | None) -> float:
+    def _daily_loss_limit_usdt(self, wallet_payload: dict[str, Any] | None) -> float:
         limit, _ = self._daily_loss_limit_details(wallet_payload)
         return limit
 
@@ -1527,23 +1527,23 @@ class TradingService:
 
         if self.state.auto_trade_profit_lock_day != day_key:
             self.state.auto_trade_profit_lock_day = day_key
-            self.state.auto_trade_daily_peak_pnl_usd = max(0.0, daily_pnl)
+            self.state.auto_trade_daily_peak_pnl_usdt = max(0.0, daily_pnl)
             self.state.auto_trade_profit_lock_active = False
             self.state.auto_trade_profit_lock_reason = ""
 
-        if daily_pnl > self.state.auto_trade_daily_peak_pnl_usd:
-            self.state.auto_trade_daily_peak_pnl_usd = daily_pnl
+        if daily_pnl > self.state.auto_trade_daily_peak_pnl_usdt:
+            self.state.auto_trade_daily_peak_pnl_usdt = daily_pnl
 
-        peak = self.state.auto_trade_daily_peak_pnl_usd
-        trigger = self.settings.auto_trade_profit_lock_trigger_usd
+        peak = self.state.auto_trade_daily_peak_pnl_usdt
+        trigger = self.settings.auto_trade_profit_lock_trigger_usdt
         if peak < trigger or peak <= 0:
             return 1.0, "", False
 
         locked_profit = peak * (1.0 - self.settings.auto_trade_profit_lock_giveback_pct / 100.0)
         giveback = peak - daily_pnl
         reason = (
-            f"profit lock active: peak {peak:.2f} USD, "
-            f"floor {locked_profit:.2f} USD"
+            f"profit lock active: peak {peak:.2f} USDT, "
+            f"floor {locked_profit:.2f} USDT"
         )
         self.state.auto_trade_profit_lock_active = True
         self.state.auto_trade_profit_lock_reason = reason
@@ -1602,7 +1602,7 @@ class TradingService:
 
         day_key = self.utc_day_key()
         daily_pnl = max(0.0, float(self.state.auto_trade_daily_pnl.get(day_key, 0.0)))
-        step = max(0.01, self.settings.auto_trade_compounding_profit_step_usd)
+        step = max(0.01, self.settings.auto_trade_compounding_profit_step_usdt)
         profit_steps = min(6.0, daily_pnl / step)
         win_boost = min(0.18, max(0, self.state.auto_trade_consecutive_wins) * 0.03)
         mult = 1.0 + (profit_steps * 0.04) + win_boost
@@ -1611,7 +1611,7 @@ class TradingService:
             mult = min(mult, 1.0)
         return mult, {
             "enabled": True,
-            "daily_pnl_usd": round(daily_pnl, 4),
+            "daily_pnl_usdt": round(daily_pnl, 4),
             "consecutive_wins": self.state.auto_trade_consecutive_wins,
             "mult": round(mult, 4),
         }
@@ -1987,7 +1987,7 @@ class TradingService:
         *,
         price: float | None = None,
         amount: float | None = None,
-        pnl_usd: float | None = None,
+        pnl_usdt: float | None = None,
         mode: str | None = None,
         success: bool = True,
     ) -> None:
@@ -2002,7 +2002,7 @@ class TradingService:
                 "message": message,
                 "price": round(price, 6) if price is not None else None,
                 "amount": round(amount, 8) if amount is not None else None,
-                "pnl_usd": round(pnl_usd, 4) if pnl_usd is not None else None,
+                "pnl_usdt": round(pnl_usdt, 4) if pnl_usdt is not None else None,
                 "mode": mode or ("paper" if self.settings.paper_trading else "live"),
                 "success": success,
             }
@@ -2544,7 +2544,7 @@ class TradingService:
         return "buy" if position_side == "SHORT" else "sell"
 
     @staticmethod
-    def _pnl_usd(position_side: str, entry_price: float, current_price: float, amount: float) -> float:
+    def _pnl_usdt(position_side: str, entry_price: float, current_price: float, amount: float) -> float:
         if position_side == "SHORT":
             return (entry_price - current_price) * amount
         return (current_price - entry_price) * amount
@@ -2564,22 +2564,22 @@ class TradingService:
         if self.state.paper_wallet_initialized:
             return
         self.state.paper_wallet_initialized = True
-        self.state.paper_wallet_free_usd = float(self.settings.paper_wallet_start_usd)
-        self.state.paper_wallet_used_usd = 0.0
-        self.state.paper_wallet_realized_pnl_usd = 0.0
+        self.state.paper_wallet_free_usdt = float(self.settings.paper_wallet_start_usdt)
+        self.state.paper_wallet_used_usdt = 0.0
+        self.state.paper_wallet_realized_pnl_usdt = 0.0
 
-    def _paper_wallet_on_entry(self, notional_usd: float) -> bool:
+    def _paper_wallet_on_entry(self, notional_usdt: float) -> bool:
         if not self._paper_wallet_enabled():
             return True
-        reserve = max(0.0, float(notional_usd))
+        reserve = max(0.0, float(notional_usdt))
         with self.state.wallet_lock:
             self._ensure_paper_wallet_locked()
-            free = max(0.0, float(self.state.paper_wallet_free_usd))
+            free = max(0.0, float(self.state.paper_wallet_free_usdt))
             if free + 1e-9 < reserve:
                 return False
-            self.state.paper_wallet_free_usd = free - reserve
-            self.state.paper_wallet_used_usd = (
-                max(0.0, float(self.state.paper_wallet_used_usd)) + reserve
+            self.state.paper_wallet_free_usdt = free - reserve
+            self.state.paper_wallet_used_usdt = (
+                max(0.0, float(self.state.paper_wallet_used_usdt)) + reserve
             )
             self.state.wallet_cache["updated_at"] = 0.0
         return True
@@ -2590,7 +2590,7 @@ class TradingService:
         position: dict[str, Any],
         closed_amount: float,
         open_amount_before_close: float,
-        pnl_usd: float,
+        pnl_usdt: float,
     ) -> None:
         if not self._paper_wallet_enabled():
             return
@@ -2598,33 +2598,33 @@ class TradingService:
             return
 
         close_ratio = self._clamp(closed_amount / open_amount_before_close, 0.0, 1.0)
-        current_notional = max(0.0, safe_float(position.get("notional_usd")) or 0.0)
+        current_notional = max(0.0, safe_float(position.get("notional_usdt")) or 0.0)
         reserved_release = current_notional * close_ratio
-        position["notional_usd"] = max(0.0, current_notional - reserved_release)
+        position["notional_usdt"] = max(0.0, current_notional - reserved_release)
 
         with self.state.wallet_lock:
             self._ensure_paper_wallet_locked()
-            self.state.paper_wallet_used_usd = max(
+            self.state.paper_wallet_used_usdt = max(
                 0.0,
-                float(self.state.paper_wallet_used_usd) - reserved_release,
+                float(self.state.paper_wallet_used_usdt) - reserved_release,
             )
-            self.state.paper_wallet_free_usd = (
-                float(self.state.paper_wallet_free_usd)
+            self.state.paper_wallet_free_usdt = (
+                float(self.state.paper_wallet_free_usdt)
                 + reserved_release
-                + float(pnl_usd)
+                + float(pnl_usdt)
             )
-            self.state.paper_wallet_realized_pnl_usd = (
-                float(self.state.paper_wallet_realized_pnl_usd) + float(pnl_usd)
+            self.state.paper_wallet_realized_pnl_usdt = (
+                float(self.state.paper_wallet_realized_pnl_usdt) + float(pnl_usdt)
             )
             self.state.wallet_cache["updated_at"] = 0.0
 
-    def _auto_convert_wallet_assets_to_usd(
+    def _auto_convert_wallet_assets_to_usdt(
         self,
         wallet_payload: dict[str, Any] | None,
         rows_by_symbol: dict[str, dict[str, Any]],
         now_ts: float,
     ) -> int:
-        if not self.settings.auto_trade_auto_convert_to_usd:
+        if not self.settings.auto_trade_auto_convert_to_usdt:
             return 0
         if self.settings.paper_trading:
             return 0
@@ -2648,10 +2648,10 @@ class TradingService:
 
         for entry in assets:
             asset = str((entry or {}).get("asset") or "").upper().strip()
-            if not asset or asset == "USD" or asset in open_base_assets:
+            if not asset or asset == "USDT" or asset in open_base_assets:
                 continue
 
-            symbol = asset
+            symbol = f"{asset}/USDT"
             if symbol not in self._runtime_auto_trade_symbols_set:
                 continue
 
@@ -2662,12 +2662,12 @@ class TradingService:
             market_row = rows_by_symbol.get(symbol, {})
             price = safe_float(market_row.get("price"))
             if price is None or price <= 0:
-                price = safe_float((entry or {}).get("price_usd"))
+                price = safe_float((entry or {}).get("price_usdt"))
             if price is None or price <= 0:
                 continue
 
-            estimated_usd = free_amount * price
-            if estimated_usd < self.settings.auto_trade_auto_convert_min_usd:
+            estimated_usdt = free_amount * price
+            if estimated_usdt < self.settings.auto_trade_auto_convert_min_usdt:
                 continue
 
             sell_amount = free_amount
@@ -2688,7 +2688,7 @@ class TradingService:
                 )
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(
-                    "Auto-convert to USD failed for %s amount=%s: %s",
+                    "Auto-convert to USDT failed for %s amount=%s: %s",
                     symbol,
                     sell_amount,
                     exc,
@@ -2697,14 +2697,14 @@ class TradingService:
 
             filled_amount = safe_float(order.get("filled")) or sell_amount
             average_price = safe_float(order.get("average")) or price
-            notional_usd = filled_amount * average_price
+            notional_usdt = filled_amount * average_price
             converted_count += 1
 
             self.push_auto_trade_event(
                 symbol,
                 "AUTO_CONVERT",
-                "SELL (AUTO->USD)",
-                f"Auto-converted {asset} to USD ({notional_usd:.2f} USD)",
+                "SELL (AUTO->USDT)",
+                f"Auto-converted {asset} to USDT ({notional_usdt:.2f} USDT)",
                 price=average_price,
                 amount=filled_amount,
                 mode="live",
@@ -2712,8 +2712,8 @@ class TradingService:
             self.alerts.emit_alert(
                 symbol=symbol,
                 alert_type="auto_trade_auto_convert",
-                title=f"{symbol} auto convert to USD",
-                message=f"Converted {filled_amount:.8f} {asset} to USD",
+                title=f"{symbol} auto convert to USDT",
+                message=f"Converted {filled_amount:.8f} {asset} to USDT",
                 severity="medium",
                 meta={
                     "event": "AUTO_CONVERT",
@@ -2721,7 +2721,7 @@ class TradingService:
                     "order_side": "SELL",
                     "price": average_price,
                     "amount": filled_amount,
-                    "reason": "AUTO_CONVERT_TO_USD",
+                    "reason": "AUTO_CONVERT_TO_USDT",
                     "mode": "LIVE",
                 },
             )
@@ -2729,10 +2729,10 @@ class TradingService:
                 symbol=symbol,
                 event_type="AUTO_CONVERT",
                 side="LONG",
-                reason="AUTO_CONVERT_TO_USD",
-                pnl_usd=None,
+                reason="AUTO_CONVERT_TO_USDT",
+                pnl_usdt=None,
                 pnl_pct=None,
-                notional_usd=notional_usd,
+                notional_usdt=notional_usdt,
                 price=average_price,
                 amount=filled_amount,
                 metadata={"asset": asset},
@@ -2761,60 +2761,60 @@ class TradingService:
         multiplier *= max(0.2, extra_multiplier)
         return max(1, int(round(base_value * multiplier)))
 
-    def _base_notional_usd(
+    def _base_notional_usdt(
         self,
-        available_usd: float | None,
+        available_usdt: float | None,
         row: dict[str, Any],
         side: str = "LONG",
         risk_multiplier: float = 1.0,
     ) -> float:
-        notional_usd = self.settings.trade_size_usd
+        notional_usdt = self.settings.trade_size_usdt
         sizing_meta: dict[str, Any] = {}
 
         if (
             self.settings.trade_size_percent > 0
-            and available_usd is not None
-            and available_usd > 0
+            and available_usdt is not None
+            and available_usdt > 0
         ):
-            notional_usd = available_usd * (self.settings.trade_size_percent / 100)
+            notional_usdt = available_usdt * (self.settings.trade_size_percent / 100)
 
         kelly_fraction_pct, kelly_meta = self._kelly_sizing_fraction_pct(row)
         sizing_meta["kelly"] = kelly_meta
         if (
             kelly_fraction_pct is not None
-            and available_usd is not None
-            and available_usd > 0
+            and available_usdt is not None
+            and available_usdt > 0
             and kelly_fraction_pct > 0
         ):
-            notional_usd = available_usd * (kelly_fraction_pct / 100.0)
+            notional_usdt = available_usdt * (kelly_fraction_pct / 100.0)
 
-        base_before_adjustments = notional_usd
+        base_before_adjustments = notional_usdt
         volatility_mult = self._volatility_size_multiplier(row)
         confidence_mult, confidence_meta = self._confidence_sizing_multiplier(row)
         regime_mult, regime_meta = self._regime_sizing_multiplier(row, side)
         compounding_mult, compounding_meta = self._compounding_multiplier()
-        notional_usd *= volatility_mult
-        notional_usd *= max(0.05, risk_multiplier)
-        notional_usd *= max(0.05, confidence_mult)
-        notional_usd *= max(0.05, regime_mult)
-        notional_usd *= max(0.05, compounding_mult)
-        notional_usd = max(notional_usd, self.settings.trade_size_usd_min)
-        notional_usd = min(notional_usd, self.settings.trade_size_usd_max)
+        notional_usdt *= volatility_mult
+        notional_usdt *= max(0.05, risk_multiplier)
+        notional_usdt *= max(0.05, confidence_mult)
+        notional_usdt *= max(0.05, regime_mult)
+        notional_usdt *= max(0.05, compounding_mult)
+        notional_usdt = max(notional_usdt, self.settings.trade_size_usdt_min)
+        notional_usdt = min(notional_usdt, self.settings.trade_size_usdt_max)
         sizing_meta.update(
             {
-                "base_notional_usd": round(base_before_adjustments, 4),
+                "base_notional_usdt": round(base_before_adjustments, 4),
                 "volatility_mult": round(volatility_mult, 4),
                 "risk_mult": round(max(0.05, risk_multiplier), 4),
                 "confidence": confidence_meta,
                 "regime": regime_meta,
                 "compounding": compounding_meta,
-                "final_notional_usd": round(notional_usd, 4),
+                "final_notional_usdt": round(notional_usdt, 4),
             }
         )
         row["_risk_sizing"] = sizing_meta
-        return notional_usd
+        return notional_usdt
 
-    def get_symbol_min_notional_usd(self, symbol: str) -> float:
+    def get_symbol_min_notional_usdt(self, symbol: str) -> float:
         try:
             if not self.state.markets_loaded:
                 self.exchange.call("load_markets")
@@ -2832,11 +2832,11 @@ class TradingService:
                 return min_cost
         except Exception:  # noqa: BLE001
             self.logger.warning(
-                "Could not determine provider min notional for %s, fallback to configured minimum",
+                "Could not determine exchange min notional for %s, fallback to configured minimum",
                 symbol,
             )
 
-        return self.settings.auto_trade_min_notional_usd
+        return self.settings.auto_trade_min_notional_usdt
 
     def run_auto_trading(
         self,
@@ -2856,7 +2856,7 @@ class TradingService:
                 return
             self.state.auto_trade_last_eval_at = now
 
-            available_usd = safe_float((wallet_payload or {}).get("usd_free"))
+            available_usdt = safe_float((wallet_payload or {}).get("usdt_free"))
             status_reason = "Waiting for valid trade setup"
             day_key = self.utc_day_key()
             self._prune_daily_pnl_history_locked(day_key)
@@ -2918,7 +2918,7 @@ class TradingService:
                         realized_amount = safe_float(partial_result.get("filled")) or partial_amount
                         realized_price = safe_float(partial_result.get("average")) or current_price
                         realized_pnl_pct = self._pnl_pct(entry_price, realized_price, position_side)
-                        realized_pnl = self._pnl_usd(
+                        realized_pnl = self._pnl_usdt(
                             position_side,
                             entry_price,
                             realized_price,
@@ -2926,7 +2926,7 @@ class TradingService:
                         )
                         notional_before_close = max(
                             0.0,
-                            safe_float(position.get("notional_usd")) or (entry_price * amount),
+                            safe_float(position.get("notional_usdt")) or (entry_price * amount),
                         )
                         close_ratio = self._clamp(realized_amount / amount, 0.0, 1.0)
                         closed_notional = notional_before_close * close_ratio
@@ -2935,7 +2935,7 @@ class TradingService:
                             self.state,
                             position.get("advanced_ai"),
                             position_side=position_side,
-                            pnl_usd=realized_pnl,
+                            pnl_usdt=realized_pnl,
                         )
                         self._update_lstm_learning(
                             symbol=symbol,
@@ -2946,7 +2946,7 @@ class TradingService:
                             position=position,
                             closed_amount=realized_amount,
                             open_amount_before_close=amount,
-                            pnl_usd=realized_pnl,
+                            pnl_usdt=realized_pnl,
                         )
                         position["amount"] = max(0.0, amount - realized_amount)
                         position["partial_tp_done"] = True
@@ -2962,14 +2962,14 @@ class TradingService:
                             event_type="PARTIAL_EXIT",
                             side=position_side,
                             reason="PARTIAL TAKE PROFIT",
-                            pnl_usd=realized_pnl,
+                            pnl_usdt=realized_pnl,
                             pnl_pct=realized_pnl_pct,
-                            notional_usd=closed_notional,
+                            notional_usdt=closed_notional,
                             price=realized_price,
                             amount=realized_amount,
                             metadata={
                                 "remaining_amount": round(position["amount"], 8),
-                                "remaining_notional_usd": round(
+                                "remaining_notional_usdt": round(
                                     max(0.0, notional_before_close - closed_notional),
                                     4,
                                 ),
@@ -2989,17 +2989,17 @@ class TradingService:
                             symbol,
                             "PARTIAL_EXIT",
                             f"{exit_side.upper()} ({position_side} PARTIAL)",
-                            f"Partial TP hit • PnL {self._fmt_usd(realized_pnl)} USD",
+                            f"Partial TP hit • PnL {self._fmt_usdt(realized_pnl)} USDT",
                             price=realized_price,
                             amount=realized_amount,
-                            pnl_usd=realized_pnl,
+                            pnl_usdt=realized_pnl,
                             mode=str(partial_result.get("mode") or "live"),
                         )
                         self.alerts.emit_alert(
                             symbol=symbol,
                             alert_type="auto_trade_partial_exit",
                             title=f"{symbol} auto {position_side} PARTIAL EXIT",
-                            message=f"Partial TP • PnL {self._fmt_usd(realized_pnl)} USD",
+                            message=f"Partial TP • PnL {self._fmt_usdt(realized_pnl)} USDT",
                             severity="medium",
                             meta={
                                 "event": "PARTIAL_EXIT",
@@ -3007,7 +3007,7 @@ class TradingService:
                                 "order_side": exit_side.upper(),
                                 "price": realized_price,
                                 "amount": realized_amount,
-                                "pnl_usd": realized_pnl,
+                                "pnl_usdt": realized_pnl,
                                 "reason": "PARTIAL TAKE PROFIT",
                                 "mode": str(partial_result.get("mode") or "live").upper(),
                             },
@@ -3057,19 +3057,19 @@ class TradingService:
                 entry_price = safe_float(position.get("entry_price")) or current_price
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 exit_price = safe_float(order_result.get("average")) or current_price
-                pnl_usd = self._pnl_usd(position_side, entry_price, exit_price, filled_amount)
+                pnl_usdt = self._pnl_usdt(position_side, entry_price, exit_price, filled_amount)
                 notional_before_close = max(
                     0.0,
-                    safe_float(position.get("notional_usd")) or (entry_price * amount),
+                    safe_float(position.get("notional_usdt")) or (entry_price * amount),
                 )
                 close_ratio = self._clamp(filled_amount / amount, 0.0, 1.0)
                 closed_notional = notional_before_close * close_ratio
-                self.state.auto_trade_daily_pnl[day_key] += pnl_usd
+                self.state.auto_trade_daily_pnl[day_key] += pnl_usdt
                 self._paper_wallet_on_close(
                     position=position,
                     closed_amount=filled_amount,
                     open_amount_before_close=amount,
-                    pnl_usd=pnl_usd,
+                    pnl_usdt=pnl_usdt,
                 )
                 self.state.auto_trade_last_action_ts[symbol] = now
                 self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(
@@ -3078,12 +3078,12 @@ class TradingService:
                 )
                 self.state.auto_trade_positions.pop(symbol, None)
                 status_reason = f"{symbol}: {position_side} closed ({reason})"
-                self._update_symbol_stats(symbol, pnl_usd)
+                self._update_symbol_stats(symbol, pnl_usdt)
                 update_advanced_model_stats(
                     self.state,
                     position.get("advanced_ai"),
                     position_side=position_side,
-                    pnl_usd=pnl_usd,
+                    pnl_usdt=pnl_usdt,
                 )
                 exit_pnl_pct = self._pnl_pct(entry_price, exit_price, position_side)
                 self._update_lstm_learning(
@@ -3096,9 +3096,9 @@ class TradingService:
                     event_type="EXIT",
                     side=position_side,
                     reason=reason,
-                    pnl_usd=pnl_usd,
+                    pnl_usdt=pnl_usdt,
                     pnl_pct=exit_pnl_pct,
-                    notional_usd=closed_notional,
+                    notional_usdt=closed_notional,
                     price=exit_price,
                     amount=filled_amount,
                     metadata={"advanced_ai": position.get("advanced_ai")},
@@ -3117,32 +3117,32 @@ class TradingService:
                     symbol,
                     "EXIT",
                     f"{exit_side.upper()} ({position_side} EXIT)",
-                    f"{reason} • PnL {self._fmt_usd(pnl_usd)} USD",
+                    f"{reason} • PnL {self._fmt_usdt(pnl_usdt)} USDT",
                     price=exit_price,
                     amount=filled_amount,
-                    pnl_usd=pnl_usd,
+                    pnl_usdt=pnl_usdt,
                     mode=str(order_result.get("mode") or "live"),
                 )
                 self.alerts.emit_alert(
                     symbol=symbol,
                     alert_type="auto_trade_exit",
                     title=f"{symbol} auto {position_side} EXIT executed",
-                    message=f"{reason} • PnL {self._fmt_usd(pnl_usd)} USD",
-                    severity=("medium" if pnl_usd >= 0 else "high"),
+                    message=f"{reason} • PnL {self._fmt_usdt(pnl_usdt)} USDT",
+                    severity=("medium" if pnl_usdt >= 0 else "high"),
                     meta={
                         "event": "EXIT",
                         "position_side": position_side,
                         "order_side": exit_side.upper(),
                         "price": exit_price,
                         "amount": filled_amount,
-                        "pnl_usd": pnl_usd,
+                        "pnl_usdt": pnl_usdt,
                         "reason": reason,
                         "mode": str(order_result.get("mode") or "live").upper(),
                     },
                 )
 
                 if (
-                    pnl_usd < 0
+                    pnl_usdt < 0
                     and self.state.auto_trade_consecutive_losses
                     >= self.settings.auto_trade_max_consecutive_losses
                 ):
@@ -3173,14 +3173,14 @@ class TradingService:
                         },
                     )
 
-            converted_assets = self._auto_convert_wallet_assets_to_usd(
+            converted_assets = self._auto_convert_wallet_assets_to_usdt(
                 wallet_payload,
                 rows_by_symbol,
                 now,
             )
             if converted_assets > 0:
                 status_reason = (
-                    f"{status_reason} • auto-convert {converted_assets} asset(s) to USD"
+                    f"{status_reason} • auto-convert {converted_assets} asset(s) to USDT"
                 )
 
             previous_halt_reason = self.state.auto_trade_halt_reason
@@ -3222,47 +3222,47 @@ class TradingService:
                         severity="medium",
                         meta={
                             "event": "PROFIT_LOCK",
-                            "pnl_usd": daily_pnl,
-                            "peak_pnl_usd": self.state.auto_trade_daily_peak_pnl_usd,
+                            "pnl_usdt": daily_pnl,
+                            "peak_pnl_usdt": self.state.auto_trade_daily_peak_pnl_usdt,
                         },
                     )
                 self.state.auto_trade_last_reason = profit_reason
                 return
 
-            daily_loss_limit_usd, daily_loss_basis = self._daily_loss_limit_details(
+            daily_loss_limit_usdt, daily_loss_basis = self._daily_loss_limit_details(
                 wallet_payload,
             )
             risk_halted = (
-                daily_loss_limit_usd > 0
-                and daily_pnl <= -daily_loss_limit_usd
+                daily_loss_limit_usdt > 0
+                and daily_pnl <= -daily_loss_limit_usdt
             )
 
             if risk_halted:
                 if self.state.auto_trade_halt_day != day_key:
                     self.state.auto_trade_halt_day = day_key
                     self.state.auto_trade_halt_reason_by_day[day_key] = (
-                        f"Daily risk limit hit ({daily_pnl:.2f} USD)"
+                        f"Daily risk limit hit ({daily_pnl:.2f} USDT)"
                     )
                     self.alerts.emit_alert(
                         symbol=self.settings.default_symbol,
                         alert_type="auto_trade_halt",
                         title="Auto-trade halted by daily risk limit",
                         message=(
-                            f"Daily PnL reached {daily_pnl:.2f} USD "
-                            f"(limit -{daily_loss_limit_usd:.2f}, {daily_loss_basis})"
+                            f"Daily PnL reached {daily_pnl:.2f} USDT "
+                            f"(limit -{daily_loss_limit_usdt:.2f}, {daily_loss_basis})"
                         ),
                         severity="high",
                         meta={
                             "event": "HALT",
-                            "pnl_usd": daily_pnl,
-                            "limit_usd": daily_loss_limit_usd,
+                            "pnl_usdt": daily_pnl,
+                            "limit_usdt": daily_loss_limit_usdt,
                             "basis": daily_loss_basis,
                             "reason": "Daily risk limit hit",
                         },
                     )
                 self.state.auto_trade_last_reason = (
-                    f"Risk halt active: daily PnL {daily_pnl:.2f} USD "
-                    f"(limit -{daily_loss_limit_usd:.2f}, {daily_loss_basis})"
+                    f"Risk halt active: daily PnL {daily_pnl:.2f} USDT "
+                    f"(limit -{daily_loss_limit_usdt:.2f}, {daily_loss_basis})"
                 )
                 return
 
@@ -3406,8 +3406,8 @@ class TradingService:
 
                 if entry_side == "SHORT" and not self.settings.paper_trading:
                     status_reason = (
-                        f"{symbol}: short entry blocked in LIVE broker mode "
-                        "(use PAPER or add a margin/short broker adapter)"
+                        f"{symbol}: short entry blocked in LIVE spot mode "
+                        "(use PAPER or derivatives integration)"
                     )
                     continue
 
@@ -3473,29 +3473,29 @@ class TradingService:
                     status_reason = f"{symbol}: waiting valid price"
                     continue
 
-                notional_usd = self._base_notional_usd(
-                    available_usd,
+                notional_usdt = self._base_notional_usdt(
+                    available_usdt,
                     row,
                     side=entry_side,
                     risk_multiplier=effective_risk_multiplier * correlation_risk_mult,
                 )
 
-                min_notional_usd = self.get_symbol_min_notional_usd(symbol)
-                required_min_notional = min_notional_usd * (
+                min_notional_usdt = self.get_symbol_min_notional_usdt(symbol)
+                required_min_notional = min_notional_usdt * (
                     1 + self.settings.auto_trade_min_buffer_pct / 100
                 )
-                notional_usd = max(notional_usd, required_min_notional)
-                if available_usd is not None:
-                    notional_usd = min(notional_usd, available_usd)
+                notional_usdt = max(notional_usdt, required_min_notional)
+                if available_usdt is not None:
+                    notional_usdt = min(notional_usdt, available_usdt)
 
-                if notional_usd <= 0 or notional_usd < required_min_notional:
+                if notional_usdt <= 0 or notional_usdt < required_min_notional:
                     status_reason = (
-                        f"{symbol}: insufficient USD for min notional "
+                        f"{symbol}: insufficient USDT for min notional "
                         f"{required_min_notional:.2f}"
                     )
                     continue
 
-                amount = notional_usd / current_price
+                amount = notional_usdt / current_price
                 exchange_side = self._entry_order_side(entry_side)
                 order_result = self.execute_auto_trade_order(
                     symbol,
@@ -3534,9 +3534,9 @@ class TradingService:
                         event_type="ENTRY_FAILED",
                         side=entry_side,
                         reason=error_message[:180],
-                        pnl_usd=None,
+                        pnl_usdt=None,
                         pnl_pct=None,
-                        notional_usd=notional_usd,
+                        notional_usdt=notional_usdt,
                         price=current_price,
                         amount=amount,
                     )
@@ -3544,16 +3544,16 @@ class TradingService:
 
                 filled_amount = safe_float(order_result.get("filled")) or amount
                 entry_price = safe_float(order_result.get("average")) or current_price
-                if not self._paper_wallet_on_entry(notional_usd):
+                if not self._paper_wallet_on_entry(notional_usdt):
                     status_reason = (
-                        f"{symbol}: insufficient PAPER wallet USD "
-                        f"({notional_usd:.2f} required)"
+                        f"{symbol}: insufficient PAPER wallet USDT "
+                        f"({notional_usdt:.2f} required)"
                     )
                     self.push_auto_trade_event(
                         symbol,
                         "ENTRY_FAILED",
                         f"{exchange_side.upper()} ({entry_side})",
-                        "Insufficient PAPER wallet USD",
+                        "Insufficient PAPER wallet USDT",
                         price=current_price,
                         amount=amount,
                         success=False,
@@ -3565,7 +3565,7 @@ class TradingService:
                     "entry_price": entry_price,
                     "amount": filled_amount,
                     "initial_amount": filled_amount,
-                    "notional_usd": notional_usd,
+                    "notional_usdt": notional_usdt,
                     "opened_at": int(now),
                     "mode": str(order_result.get("mode") or "live"),
                     "highest_price": entry_price,
@@ -3587,15 +3587,15 @@ class TradingService:
                     order_side=exchange_side,
                     entry_price=entry_price,
                     amount=filled_amount,
-                    notional_usd=notional_usd,
+                    notional_usdt=notional_usdt,
                 )
                 self.state.auto_trade_last_action_ts[symbol] = now
                 self.state.auto_trade_cooldown_until[symbol] = now + self._next_cooldown_seconds(
                     row,
                     extra_multiplier=float(adaptive_profile["cooldown_mult"]),
                 )
-                if available_usd is not None:
-                    available_usd = max(0.0, available_usd - notional_usd)
+                if available_usdt is not None:
+                    available_usdt = max(0.0, available_usdt - notional_usdt)
                 status_reason = (
                     f"{symbol}: {entry_side} opened at {entry_price:.6f} • "
                     f"score {safe_float(row.get('entry_score')) or 0:.1f} • "
@@ -3640,9 +3640,9 @@ class TradingService:
                     event_type="ENTRY",
                     side=entry_side,
                     reason=reason_text or "Rule entry passed",
-                    pnl_usd=None,
+                    pnl_usdt=None,
                     pnl_pct=None,
-                    notional_usd=notional_usd,
+                    notional_usdt=notional_usdt,
                     price=entry_price,
                     amount=filled_amount,
                     metadata={
@@ -3683,7 +3683,7 @@ class TradingService:
             daily_pnl = self.state.auto_trade_daily_pnl.get(day_key, 0.0)
             daily_pnl_history = self._daily_pnl_history_locked(limit_days=self._daily_pnl_history_days)
             daily_pnl_30d = sum(
-                safe_float(row.get("pnl_usd")) or 0.0
+                safe_float(row.get("pnl_usdt")) or 0.0
                 for row in daily_pnl_history
             )
             position = self.state.auto_trade_positions.get(selected_symbol)
@@ -3738,7 +3738,7 @@ class TradingService:
                     "correct": correct,
                     "wrong": int(safe_float(stats.get("wrong")) or 0),
                     "win_rate": round(correct / predictions, 4) if predictions > 0 else 0.0,
-                    "pnl_usd": round(float(safe_float(stats.get("pnl_usd")) or 0.0), 4),
+                    "pnl_usdt": round(float(safe_float(stats.get("pnl_usdt")) or 0.0), 4),
                     "weight": round(float(safe_float(stats.get("weight")) or 0.0), 4),
                 }
             performance = build_performance_analytics(
@@ -3746,7 +3746,7 @@ class TradingService:
                 daily_pnl_history,
             )
             advanced_cv = build_time_series_cv_report(list(self.state.auto_trade_journal))
-            daily_loss_limit_usd, daily_loss_limit_basis = self._daily_loss_limit_details(None)
+            daily_loss_limit_usdt, daily_loss_limit_basis = self._daily_loss_limit_details(None)
             lstm_updates = sum(
                 int(safe_float(values.get("updates")) or 0)
                 for values in self.state.auto_trade_lstm_state.values()
@@ -3758,9 +3758,9 @@ class TradingService:
                 "paper_trading": self.settings.paper_trading,
                 "exchange": self.settings.exchange_name,
                 "symbols": self._runtime_auto_trade_symbols,
-                "trade_size_usd": self.settings.trade_size_usd,
-                "trade_size_usd_min": round(self.settings.trade_size_usd_min, 4),
-                "trade_size_usd_max": round(self.settings.trade_size_usd_max, 4),
+                "trade_size_usdt": self.settings.trade_size_usdt,
+                "trade_size_usdt_min": round(self.settings.trade_size_usdt_min, 4),
+                "trade_size_usdt_max": round(self.settings.trade_size_usdt_max, 4),
                 "trade_size_percent": round(self.settings.trade_size_percent, 4),
                 "risk_multiplier": round(self.state.auto_trade_last_risk_multiplier, 4),
                 "guardrail_active": self.state.auto_trade_guardrail_active,
@@ -3775,7 +3775,7 @@ class TradingService:
                 "max_correlated_positions": self.settings.auto_trade_max_correlated_positions,
                 "max_drawdown_enabled": self.settings.auto_trade_max_drawdown_enabled,
                 "max_drawdown_limit_pct": round(self.settings.auto_trade_max_drawdown_pct, 4),
-                "peak_equity_usd": round(self.state.auto_trade_peak_equity_usd, 4),
+                "peak_equity_usdt": round(self.state.auto_trade_peak_equity_usdt, 4),
                 "current_drawdown_pct": round(self.state.auto_trade_current_drawdown_pct, 4),
                 "max_drawdown_pct": round(self.state.auto_trade_max_drawdown_pct, 4),
                 "dynamic_exit_enabled": self.settings.auto_trade_dynamic_exit_enabled,
@@ -3793,15 +3793,15 @@ class TradingService:
                 "profit_lock_enabled": self.settings.auto_trade_profit_lock_enabled,
                 "profit_lock_active": self.state.auto_trade_profit_lock_active,
                 "profit_lock_reason": self.state.auto_trade_profit_lock_reason,
-                "profit_lock_trigger_usd": round(
-                    self.settings.auto_trade_profit_lock_trigger_usd,
+                "profit_lock_trigger_usdt": round(
+                    self.settings.auto_trade_profit_lock_trigger_usdt,
                     4,
                 ),
                 "profit_lock_giveback_pct": round(
                     self.settings.auto_trade_profit_lock_giveback_pct,
                     4,
                 ),
-                "daily_peak_pnl_usd": round(self.state.auto_trade_daily_peak_pnl_usd, 4),
+                "daily_peak_pnl_usdt": round(self.state.auto_trade_daily_peak_pnl_usdt, 4),
                 "entry_quality_enabled": self.settings.auto_trade_entry_quality_enabled,
                 "min_entry_score": self.settings.auto_trade_min_entry_score,
                 "min_entry_probability": self.settings.auto_trade_min_entry_probability,
@@ -3817,7 +3817,7 @@ class TradingService:
                 "lstm_update_count": lstm_updates,
                 "performance": performance,
                 "market_regime": dict(self.state.market_regime_summary),
-                "min_notional_usd": round(self.settings.auto_trade_min_notional_usd, 4),
+                "min_notional_usdt": round(self.settings.auto_trade_min_notional_usdt, 4),
                 "min_buffer_pct": round(self.settings.auto_trade_min_buffer_pct, 4),
                 "strategy_mode": self.settings.auto_trade_strategy_mode,
                 "short_enabled": self.settings.auto_trade_enable_short,
@@ -3912,19 +3912,19 @@ class TradingService:
                 "profile_middle_ema_slow_span": self.settings.auto_trade_profile_middle_ema_slow,
                 "profile_strong_ema_fast_span": self.settings.auto_trade_profile_strong_ema_fast,
                 "profile_strong_ema_slow_span": self.settings.auto_trade_profile_strong_ema_slow,
-                "auto_convert_to_usd": self.settings.auto_trade_auto_convert_to_usd,
-                "auto_convert_min_usd": round(self.settings.auto_trade_auto_convert_min_usd, 4),
+                "auto_convert_to_usdt": self.settings.auto_trade_auto_convert_to_usdt,
+                "auto_convert_min_usdt": round(self.settings.auto_trade_auto_convert_min_usdt, 4),
                 "auto_convert_interval_seconds": (
                     self.settings.auto_trade_auto_convert_interval_seconds
                 ),
                 "cooldown_seconds": self.settings.cooldown_seconds,
                 "cooldown_min_seconds": self.settings.cooldown_min_seconds,
                 "cooldown_max_seconds": self.settings.cooldown_max_seconds,
-                "daily_pnl_usd": round(daily_pnl, 4),
-                "daily_pnl_30d_usd": round(daily_pnl_30d, 4),
+                "daily_pnl_usdt": round(daily_pnl, 4),
+                "daily_pnl_30d_usdt": round(daily_pnl_30d, 4),
                 "daily_pnl_history_days": self._daily_pnl_history_days,
-                "daily_loss_absolute_usd": round(self.settings.max_daily_loss_usd, 4),
-                "daily_loss_limit_usd": round(daily_loss_limit_usd, 4),
+                "daily_loss_absolute_usdt": round(self.settings.max_daily_loss_usdt, 4),
+                "daily_loss_limit_usdt": round(daily_loss_limit_usdt, 4),
                 "daily_loss_limit_basis": daily_loss_limit_basis,
                 "max_daily_loss_pct": round(self.settings.auto_trade_max_daily_loss_pct, 4),
                 "halted": halt_type is not None,

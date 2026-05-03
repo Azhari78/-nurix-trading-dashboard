@@ -43,7 +43,7 @@ market_state = MarketStateManager(
     trade_tape_limit=settings.trade_tape_limit,
     orderbook_depth=settings.orderbook_depth,
 )
-exchange_stream = ExchangeStreamService(settings, market_state, logger, exchange)
+exchange_stream = ExchangeStreamService(settings, market_state, logger)
 alerts = AlertService(state, settings=settings, logger=logger)
 trading = TradingService(settings, state, exchange, alerts, logger)
 sentiment = SentimentService(
@@ -163,10 +163,10 @@ def health() -> dict[str, Any]:
     now = int(time.time())
     return {
         "status": "ok",
-        "service": "stockbot-dashboard",
+        "service": "nurix-trading-dashboard",
         "timestamp": now,
         "uptime_seconds": now - settings.service_started_at,
-        "market_data_provider": settings.exchange_name,
+        "exchange": settings.exchange_name,
         "symbol_count": len(settings.symbols),
         "default_timeframe": settings.default_timeframe,
         "auto_trade_enabled": settings.auto_trade_enabled,
@@ -196,9 +196,9 @@ def trade_journal_csv(limit: int = 1000) -> Response:
             "event_type",
             "side",
             "reason",
-            "pnl_usd",
+            "pnl_usdt",
             "pnl_pct",
-            "notional_usd",
+            "notional_usdt",
             "price",
             "amount",
             "metadata",
@@ -216,9 +216,9 @@ def trade_journal_csv(limit: int = 1000) -> Response:
                 str(row.get("event_type") or ""),
                 str(row.get("side") or ""),
                 str(row.get("reason") or ""),
-                row.get("pnl_usd"),
+                row.get("pnl_usdt"),
                 row.get("pnl_pct"),
-                row.get("notional_usd"),
+                row.get("notional_usdt"),
                 row.get("price"),
                 row.get("amount"),
                 json.dumps(metadata, ensure_ascii=True),

@@ -24,7 +24,7 @@ class AlertService:
         self.settings = settings
         self.logger = logger or logging.getLogger(__name__)
 
-    def _create_alert_unlocked(
+    def create_alert(
         self,
         symbol: str,
         alert_type: str,
@@ -46,25 +46,6 @@ class AlertService:
         }
         self.state.alert_events.append(event)
         return event
-
-    def create_alert(
-        self,
-        symbol: str,
-        alert_type: str,
-        title: str,
-        message: str,
-        severity: str,
-        meta: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        with self.state.alert_lock:
-            return self._create_alert_unlocked(
-                symbol=symbol,
-                alert_type=alert_type,
-                title=title,
-                message=message,
-                severity=severity,
-                meta=meta,
-            )
 
     def _telegram_ready(self) -> bool:
         if not self.settings:
@@ -146,7 +127,7 @@ class AlertService:
 
         message = str(alert.get("message") or "")
         if "price" not in meta:
-            entry_match = re.search(r"Entry\s+([0-9]+(?:\.[0-9]+)?)", message, re.IGNORECASE)
+            entry_match = re.search(r"Entry\\s+([0-9]+(?:\\.[0-9]+)?)", message, re.IGNORECASE)
             if entry_match:
                 with_value = entry_match.group(1)
                 try:
@@ -154,19 +135,19 @@ class AlertService:
                 except ValueError:
                     pass
         if "amount" not in meta:
-            qty_match = re.search(r"size\s+([0-9]+(?:\.[0-9]+)?)", message, re.IGNORECASE)
+            qty_match = re.search(r"size\\s+([0-9]+(?:\\.[0-9]+)?)", message, re.IGNORECASE)
             if qty_match:
                 with_value = qty_match.group(1)
                 try:
                     meta["amount"] = float(with_value)
                 except ValueError:
                     pass
-        if "pnl_usd" not in meta:
-            pnl_match = re.search(r"PnL\s+(-?[0-9]+(?:\.[0-9]+)?)\s*USD", message, re.IGNORECASE)
+        if "pnl_usdt" not in meta:
+            pnl_match = re.search(r"PnL\\s+(-?[0-9]+(?:\\.[0-9]+)?)\\s*USDT", message, re.IGNORECASE)
             if pnl_match:
                 with_value = pnl_match.group(1)
                 try:
-                    meta["pnl_usd"] = float(with_value)
+                    meta["pnl_usdt"] = float(with_value)
                 except ValueError:
                     pass
         return meta
@@ -191,7 +172,7 @@ class AlertService:
             reason = str(meta.get("reason") or "").strip()
             price = safe_float(meta.get("price"))
             amount = safe_float(meta.get("amount"))
-            pnl_usd = safe_float(meta.get("pnl_usd"))
+            pnl_usdt = safe_float(meta.get("pnl_usdt"))
 
             event_label = {
                 "ENTRY": "ENTRY OPENED",
@@ -220,7 +201,7 @@ class AlertService:
             order_icon = "🟢" if order_side == "BUY" else "🔴" if order_side == "SELL" else "⚪"
 
             lines = [
-                f"{event_icon} StockBot Auto-Trade {event_label}",
+                f"{event_icon} Nurix Auto-Trade {event_label}",
                 f"• Pair: {symbol}",
             ]
             if position_side and position_side != "-":
@@ -233,8 +214,8 @@ class AlertService:
                 lines.append(f"• Price: {self._format_price(price)}")
             if amount is not None and amount > 0:
                 lines.append(f"• Qty: {self._format_qty(amount)}")
-            if pnl_usd is not None:
-                lines.append(f"• PnL: {pnl_usd:+.2f} USD")
+            if pnl_usdt is not None:
+                lines.append(f"• PnL: {pnl_usdt:+.2f} USDT")
             if reason:
                 lines.append(f"• Reason: {reason}")
             if event == "DAILY_RECAP":
@@ -242,7 +223,7 @@ class AlertService:
                 trades = safe_float(meta.get("trades"))
                 win_rate = safe_float(meta.get("win_rate_pct"))
                 top_symbol = str(meta.get("top_symbol") or "").strip()
-                top_symbol_pnl = safe_float(meta.get("top_symbol_pnl_usd"))
+                top_symbol_pnl = safe_float(meta.get("top_symbol_pnl_usdt"))
                 halt_reason = str(meta.get("halt_reason") or "").strip()
                 if day_key:
                     lines.append(f"• Day: {day_key}")
@@ -254,7 +235,7 @@ class AlertService:
                     if top_symbol_pnl is None:
                         lines.append(f"• Top Symbol: {top_symbol}")
                     else:
-                        lines.append(f"• Top Symbol: {top_symbol} ({top_symbol_pnl:+.2f} USD)")
+                        lines.append(f"• Top Symbol: {top_symbol} ({top_symbol_pnl:+.2f} USDT)")
                 if halt_reason:
                     lines.append(f"• Halt Reason: {halt_reason}")
             include_info = bool(message)
@@ -267,7 +248,7 @@ class AlertService:
             return "\n".join(lines)
 
         return (
-            f"📣 StockBot Alert\n"
+            f"📣 Nurix Alert\n"
             f"• Symbol: {symbol}\n"
             f"• Type: {title}\n"
             f"• Severity: {severity}\n"
@@ -317,7 +298,7 @@ class AlertService:
                 prev_ai_bias = previous.get("ai_bias")
 
                 if prev_signal and signal and prev_signal != signal:
-                    self._create_alert_unlocked(
+                    self.create_alert(
                         symbol=symbol,
                         alert_type="signal_flip",
                         title=f"{symbol} signal changed",
@@ -327,7 +308,7 @@ class AlertService:
 
                 if prev_zone and rsi_zone != prev_zone:
                     if rsi_zone == "overbought":
-                        self._create_alert_unlocked(
+                        self.create_alert(
                             symbol=symbol,
                             alert_type="rsi_overbought",
                             title=f"{symbol} RSI overbought",
@@ -335,7 +316,7 @@ class AlertService:
                             severity="medium",
                         )
                     elif rsi_zone == "oversold":
-                        self._create_alert_unlocked(
+                        self.create_alert(
                             symbol=symbol,
                             alert_type="rsi_oversold",
                             title=f"{symbol} RSI oversold",
@@ -344,7 +325,7 @@ class AlertService:
                         )
 
                 if prev_ai_bias and ai_bias != prev_ai_bias:
-                    self._create_alert_unlocked(
+                    self.create_alert(
                         symbol=symbol,
                         alert_type="ai_bias_change",
                         title=f"{symbol} AI filter bias changed",
@@ -374,12 +355,5 @@ class AlertService:
         meta: dict[str, Any] | None = None,
     ) -> None:
         with self.state.alert_lock:
-            alert = self._create_alert_unlocked(
-                symbol,
-                alert_type,
-                title,
-                message,
-                severity,
-                meta=meta,
-            )
+            alert = self.create_alert(symbol, alert_type, title, message, severity, meta=meta)
         self._send_telegram_async(alert)

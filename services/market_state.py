@@ -317,11 +317,11 @@ class MarketStateManager:
 
         if not bids and not asks and not trades:
             if connected:
-                error = "Order book and tape data are not available from the stock quote feed."
+                error = "Waiting for exchange stream data..."
             elif last_error:
-                error = f"Stock quote feed reconnecting: {last_error}"
+                error = f"Exchange stream reconnecting: {last_error}"
             else:
-                error = "Stock quote feed is not connected yet. Retrying..."
+                error = "Exchange stream is not connected yet. Retrying..."
         else:
             error = None
 

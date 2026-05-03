@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: stockbot-dashboard
+    name: nurix-trading-dashboard
     env: python
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
@@ -8,7 +8,7 @@ services:
     autoDeploy: true
     # Persistent disk keeps dashboard runtime data across deploys/restarts.
     disk:
-      name: stockbot-dashboard-data
+      name: nurix-dashboard-data
       mountPath: /var/data
       sizeGB: 1
     envVars:
@@ -17,26 +17,10 @@ services:
       - key: WEB_CONCURRENCY
         value: "1"
 
-      - key: MARKET_DATA_PROVIDER
-        value: momostock
-      - key: MOOMOO_OPEND_HOST
-        value: 127.0.0.1
-      - key: MOOMOO_OPEND_PORT
-        value: "11111"
-      - key: MOOMOO_MARKET_PREFIX
-        value: US
-      - key: MOOMOO_EXTENDED_TIME
-        value: "false"
-      - key: MOOMOO_FALLBACK_TO_YAHOO
-        value: "true"
-      - key: MOOMOO_LOG_HOME
-        value: /var/data/moomoo
-      - key: MOOMOO_HISTORY_DAYS_INTRADAY
-        value: "30"
-      - key: MOOMOO_HISTORY_DAYS_DAILY
-        value: "730"
+      - key: EXCHANGE_NAME
+        value: gateio
       - key: SYMBOLS
-        value: AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,AVGO,NFLX,JPM,BAC,WMT,COST,KO,DIS,PYPL,PLTR,SOFI,RIVN,SPY,QQQ,IWM,DIA
+        value: BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,TRX/USDT,AVAX/USDT,LINK/USDT,DOT/USDT,POL/USDT,LTC/USDT,BCH/USDT,XLM/USDT,ATOM/USDT,XMR/USDT,ETC/USDT,UNI/USDT,FIL/USDT,HBAR/USDT,NEAR/USDT,ICP/USDT,VET/USDT,CRO/USDT,ALGO/USDT,SUI/USDT,INJ/USDT,APT/USDT,OP/USDT,ARB/USDT,RNDR/USDT,IMX/USDT,STX/USDT,MKR/USDT,AAVE/USDT,THETA/USDT,EOS/USDT,EGLD/USDT,MANA/USDT,SAND/USDT,FTM/USDT,TIA/USDT,PEPE/USDT,SHIB/USDT,BONK/USDT,GRT/USDT,LDO/USDT,FLOW/USDT,SEI/USDT
       - key: DEFAULT_TIMEFRAME
         value: 5m
       - key: SIGNAL_TIMEFRAME
@@ -47,21 +31,21 @@ services:
       - key: STREAM_SSL_CA_BUNDLE
         value: ""
 
-      # Safe defaults for first deploy. Stock order execution is paper-only until a broker adapter is added.
+      # Safe defaults for first deploy. Switch to live trading only after validation.
       - key: AUTO_TRADE_ENABLED
         value: "true"
       - key: PAPER_TRADING
         value: "true"
       - key: PAPER_WALLET_ENABLED
         value: "true"
-      - key: PAPER_WALLET_START_USD
+      - key: PAPER_WALLET_START_USDT
         value: "10000"
       - key: AUTO_TRADE_STATE_FILE
         value: "/var/data/auto_trade_state.json"
       - key: AUTO_TRADE_STATE_SAVE_INTERVAL_SECONDS
         value: "5"
       - key: AUTO_TRADE_SYMBOLS
-        value: AAPL,MSFT,NVDA
+        value: BTC/USDT,ETH/USDT
       - key: AUTO_TRADE_STRATEGY_MODE
         value: long_only
       - key: AUTO_TRADE_ENABLE_SHORT
@@ -70,11 +54,11 @@ services:
         value: "1"
       - key: AUTO_TRADE_SYMBOL_VALIDATION_ENABLED
         value: "true"
-      - key: TRADE_SIZE_USD
+      - key: TRADE_SIZE_USDT
         value: "100"
-      - key: TRADE_SIZE_USD_MIN
+      - key: TRADE_SIZE_USDT_MIN
         value: "100"
-      - key: TRADE_SIZE_USD_MAX
+      - key: TRADE_SIZE_USDT_MAX
         value: "100"
       - key: TRADE_SIZE_PERCENT
         value: "0"
@@ -86,7 +70,7 @@ services:
         value: "0.55"
       - key: AUTO_TRADE_VOLATILITY_SIZE_MAX_MULT
         value: "1.65"
-      - key: AUTO_TRADE_MIN_NOTIONAL_USD
+      - key: AUTO_TRADE_MIN_NOTIONAL_USDT
         value: "3.5"
       - key: AUTO_TRADE_MIN_BUFFER_PCT
         value: "1.5"
@@ -200,7 +184,7 @@ services:
         value: "3"
       - key: AUTO_TRADE_KILL_SWITCH_PAUSE_SECONDS
         value: "1800"
-      - key: MAX_DAILY_LOSS_USD
+      - key: MAX_DAILY_LOSS_USDT
         value: "20"
       - key: AUTO_TRADE_MIN_CONFIDENCE
         value: "55"
@@ -210,7 +194,7 @@ services:
         value: "14"
       - key: AUTO_TRADE_FORWARD_BASELINE_WIN_RATE
         value: "0.52"
-      - key: AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USD
+      - key: AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USDT
         value: "0.03"
       - key: AUTO_TRADE_FORWARD_GUARDRAIL_RISK_MULT
         value: "0.6"
