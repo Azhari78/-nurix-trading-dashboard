@@ -41,11 +41,11 @@ def build_performance_analytics(
         row
         for row in journal_rows
         if row.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
-        and safe_float(row.get("pnl_usdt")) is not None
+        and safe_float(row.get("pnl_usd")) is not None
     ]
     realized.sort(key=lambda row: int(row.get("timestamp") or 0))
 
-    pnl_values = [float(safe_float(row.get("pnl_usdt")) or 0.0) for row in realized]
+    pnl_values = [float(safe_float(row.get("pnl_usd")) or 0.0) for row in realized]
     trade_count = len(pnl_values)
     wins = [value for value in pnl_values if value >= 0]
     losses = [value for value in pnl_values if value < 0]
@@ -56,12 +56,12 @@ def build_performance_analytics(
     avg_loss = (gross_loss_abs / len(losses)) if losses else 0.0
     expectancy = (win_rate * avg_win) - ((1.0 - win_rate) * avg_loss)
     profit_factor = (gross_profit / gross_loss_abs) if gross_loss_abs > 1e-12 else 0.0
-    max_drawdown_usdt, max_drawdown_pct = _max_drawdown(pnl_values)
+    max_drawdown_usd, max_drawdown_pct = _max_drawdown(pnl_values)
 
     trade_returns = []
     for row in realized:
-        pnl = safe_float(row.get("pnl_usdt"))
-        notional = safe_float(row.get("notional_usdt"))
+        pnl = safe_float(row.get("pnl_usd"))
+        notional = safe_float(row.get("notional_usd"))
         if pnl is None or notional is None or notional <= 0:
             continue
         trade_returns.append(pnl / notional)
@@ -80,21 +80,21 @@ def build_performance_analytics(
         sortino = 0.0
 
     daily_values = [
-        float(safe_float(row.get("pnl_usdt")) or 0.0)
+        float(safe_float(row.get("pnl_usd")) or 0.0)
         for row in daily_pnl_history
     ]
-    daily_drawdown_usdt, daily_drawdown_pct = _max_drawdown(list(reversed(daily_values)))
+    daily_drawdown_usd, daily_drawdown_pct = _max_drawdown(list(reversed(daily_values)))
 
     by_symbol: dict[str, dict[str, Any]] = {}
     for row in realized:
         symbol = str(row.get("symbol") or "-").upper()
-        pnl = float(safe_float(row.get("pnl_usdt")) or 0.0)
+        pnl = float(safe_float(row.get("pnl_usd")) or 0.0)
         bucket = by_symbol.setdefault(
             symbol,
-            {"trades": 0, "wins": 0, "losses": 0, "pnl_usdt": 0.0},
+            {"trades": 0, "wins": 0, "losses": 0, "pnl_usd": 0.0},
         )
         bucket["trades"] += 1
-        bucket["pnl_usdt"] += pnl
+        bucket["pnl_usd"] += pnl
         if pnl >= 0:
             bucket["wins"] += 1
         else:
@@ -111,28 +111,28 @@ def build_performance_analytics(
                 "wins": wins_count,
                 "losses": int(stats["losses"]),
                 "win_rate": round(wins_count / trades, 4) if trades else 0.0,
-                "pnl_usdt": round(float(stats["pnl_usdt"]), 4),
+                "pnl_usd": round(float(stats["pnl_usd"]), 4),
             }
         )
-    symbol_rows.sort(key=lambda row: float(row.get("pnl_usdt") or 0.0), reverse=True)
+    symbol_rows.sort(key=lambda row: float(row.get("pnl_usd") or 0.0), reverse=True)
 
     return {
         "trade_count": trade_count,
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": round(win_rate, 4),
-        "gross_profit_usdt": round(gross_profit, 4),
-        "gross_loss_usdt": round(-gross_loss_abs, 4),
+        "gross_profit_usd": round(gross_profit, 4),
+        "gross_loss_usd": round(-gross_loss_abs, 4),
         "profit_factor": round(profit_factor, 4),
-        "expectancy_usdt": round(expectancy, 4),
-        "avg_win_usdt": round(avg_win, 4),
-        "avg_loss_usdt": round(avg_loss, 4),
+        "expectancy_usd": round(expectancy, 4),
+        "avg_win_usd": round(avg_win, 4),
+        "avg_loss_usd": round(avg_loss, 4),
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": round(sortino, 4),
-        "max_drawdown_usdt": round(max_drawdown_usdt, 4),
+        "max_drawdown_usd": round(max_drawdown_usd, 4),
         "max_drawdown_pct": round(max_drawdown_pct, 4),
-        "daily_max_drawdown_usdt": round(daily_drawdown_usdt, 4),
+        "daily_max_drawdown_usd": round(daily_drawdown_usd, 4),
         "daily_max_drawdown_pct": round(daily_drawdown_pct, 4),
-        "pnl_usdt": round(sum(pnl_values), 4),
+        "pnl_usd": round(sum(pnl_values), 4),
         "by_symbol": symbol_rows[:12],
     }

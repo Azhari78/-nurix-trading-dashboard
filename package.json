@@ -1,5 +1,5 @@
 {
-  "name": "nurix-trading-dashboard",
+  "name": "stockbot-dashboard",
   "private": true,
   "scripts": {
     "build": "python -m pip install --upgrade pip && python -m pip install -r requirements.txt"

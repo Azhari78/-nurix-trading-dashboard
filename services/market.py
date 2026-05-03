@@ -636,10 +636,7 @@ class MarketService:
                 error_text = str(exc)
                 is_global_rest_issue = (
                     "GET https://" in error_text
-                    and (
-                        "api.gateio.ws" in error_text
-                        or "api.binance.com" in error_text
-                    )
+                    and "query1.finance.yahoo.com" in error_text
                 )
                 if is_global_rest_issue:
                     if now_ts - self._global_rest_error_logged_at >= 60.0:
@@ -791,16 +788,16 @@ class MarketService:
     ) -> dict[str, Any]:
         if not self.state.paper_wallet_initialized:
             self.state.paper_wallet_initialized = True
-            self.state.paper_wallet_free_usdt = float(self.settings.paper_wallet_start_usdt)
-            self.state.paper_wallet_used_usdt = 0.0
-            self.state.paper_wallet_realized_pnl_usdt = 0.0
+            self.state.paper_wallet_free_usd = float(self.settings.paper_wallet_start_usd)
+            self.state.paper_wallet_used_usd = 0.0
+            self.state.paper_wallet_realized_pnl_usd = 0.0
 
-        free_usdt = max(0.0, float(self.state.paper_wallet_free_usdt))
+        free_usd = max(0.0, float(self.state.paper_wallet_free_usd))
         tracked_assets: list[str] = []
         tracked_asset_set: set[str] = set()
         for symbol in self.settings.auto_trade_symbols:
             base_asset = str(symbol or "").split("/", 1)[0].upper()
-            if not base_asset or base_asset == "USDT" or base_asset in tracked_asset_set:
+            if not base_asset or base_asset == "USD" or base_asset in tracked_asset_set:
                 continue
             tracked_assets.append(base_asset)
             tracked_asset_set.add(base_asset)
@@ -830,11 +827,11 @@ class MarketService:
             if side == "SHORT":
                 reserved_notional = max(
                     0.0,
-                    safe_float(raw_position.get("notional_usdt")) or (entry_price * amount),
+                    safe_float(raw_position.get("notional_usd")) or (entry_price * amount),
                 )
-                pnl_usdt = (entry_price - current_price) * amount
+                pnl_usd = (entry_price - current_price) * amount
                 short_reserved_total += reserved_notional
-                short_equity_total += max(0.0, reserved_notional + pnl_usdt)
+                short_equity_total += max(0.0, reserved_notional + pnl_usd)
                 continue
 
             base_asset = symbol.split("/", 1)[0].upper()
@@ -848,67 +845,67 @@ class MarketService:
             long_amount_by_asset[base_asset] += amount
             long_value_by_asset[base_asset] += current_price * amount
 
-        usdt_total = max(0.0, free_usdt + short_reserved_total)
-        usdt_equity_value = max(0.0, free_usdt + short_equity_total)
+        usd_total = max(0.0, free_usd + short_reserved_total)
+        usd_equity_value = max(0.0, free_usd + short_equity_total)
 
         assets: list[dict[str, Any]] = [
             {
-                "asset": "USDT",
-                "free": round(free_usdt, 8),
+                "asset": "USD",
+                "free": round(free_usd, 8),
                 "used": round(short_reserved_total, 8),
-                "total": round(usdt_total, 8),
-                "price_usdt": 1.0,
-                "usdt_value": round(usdt_equity_value, 6),
+                "total": round(usd_total, 8),
+                "price_usd": 1.0,
+                "usd_value": round(usd_equity_value, 6),
             }
         ]
 
         long_equity_total = 0.0
         for asset in tracked_assets:
-            symbol = f"{asset}/USDT"
+            symbol = asset
             amount = max(0.0, long_amount_by_asset.get(asset) or 0.0)
             market_price = safe_float(price_lookup.get(symbol))
             fallback_value = max(0.0, long_value_by_asset.get(asset) or 0.0)
 
             if amount > 0 and market_price is not None and market_price > 0:
-                value_usdt = amount * market_price
-                price_usdt = market_price
+                value_usd = amount * market_price
+                price_usd = market_price
             elif amount > 0:
-                value_usdt = fallback_value
-                price_usdt = (fallback_value / amount) if fallback_value > 0 else None
+                value_usd = fallback_value
+                price_usd = (fallback_value / amount) if fallback_value > 0 else None
             else:
-                value_usdt = 0.0
-                price_usdt = (
+                value_usd = 0.0
+                price_usd = (
                     market_price
                     if market_price is not None and market_price > 0
                     else None
                 )
 
-            long_equity_total += value_usdt
+            long_equity_total += value_usd
             assets.append(
                 {
                     "asset": asset,
                     "free": 0.0,
                     "used": round(amount, 8),
                     "total": round(amount, 8),
-                    "price_usdt": (round(price_usdt, 8) if price_usdt is not None else None),
-                    "usdt_value": round(value_usdt, 6),
+                    "price_usd": (round(price_usd, 8) if price_usd is not None else None),
+                    "usd_value": round(value_usd, 6),
                 }
             )
 
-        total_usdt = max(0.0, usdt_equity_value + long_equity_total)
+        total_usd = max(0.0, usd_equity_value + long_equity_total)
 
         day_key = self.utc_day_key()
         if self.state.wallet_day_key != day_key:
             self.state.wallet_day_key = day_key
-            self.state.wallet_day_start_total_usdt = (
-                total_usdt if total_usdt > 0 else None
+            self.state.wallet_day_start_total_usd = (
+                total_usd if total_usd > 0 else None
             )
-        if self.state.wallet_day_start_total_usdt is None and total_usdt > 0:
-            self.state.wallet_day_start_total_usdt = total_usdt
+        if self.state.wallet_day_start_total_usd is None and total_usd > 0:
+            self.state.wallet_day_start_total_usd = total_usd
 
-        day_start_total = self.state.wallet_day_start_total_usdt
+        day_start_total = self.state.wallet_day_start_total_usd
         daily_pnl_estimate = (
-            total_usdt - day_start_total
+            total_usd - day_start_total
             if day_start_total is not None
             else None
         )
@@ -924,12 +921,12 @@ class MarketService:
             "exchange": f"{self.settings.exchange_name}-paper",
             "updated_at": int(now),
             "asset_count": len(assets),
-            "total_usdt_estimate": round(total_usdt, 2),
-            "usdt_free": round(free_usdt, 6),
-            "usdt_total": round(usdt_total, 6),
+            "total_usd_estimate": round(total_usd, 2),
+            "usd_free": round(free_usd, 6),
+            "usd_total": round(usd_total, 6),
             "assets": assets[:25],
             "error": None,
-            "daily_pnl_estimate_usdt": (
+            "daily_pnl_estimate_usd": (
                 round(daily_pnl_estimate, 2)
                 if daily_pnl_estimate is not None
                 else None
@@ -939,7 +936,7 @@ class MarketService:
                 if daily_pnl_pct is not None
                 else None
             ),
-            "day_start_total_usdt": (
+            "day_start_total_usd": (
                 round(day_start_total, 2)
                 if day_start_total is not None
                 else None
@@ -990,14 +987,14 @@ class MarketService:
                     "exchange": self.settings.exchange_name,
                     "updated_at": int(now),
                     "asset_count": 0,
-                    "total_usdt_estimate": None,
-                    "usdt_free": None,
-                    "usdt_total": None,
+                    "total_usd_estimate": None,
+                    "usd_free": None,
+                    "usd_total": None,
                     "assets": [],
-                    "error": "Wallet unavailable: API key/secret is missing in .env",
-                    "daily_pnl_estimate_usdt": None,
+                    "error": "Portfolio unavailable: live broker adapter is not configured",
+                    "daily_pnl_estimate_usd": None,
                     "daily_pnl_estimate_pct": None,
-                    "day_start_total_usdt": None,
+                    "day_start_total_usd": None,
                     "pnl_day_key": None,
                     "pnl_basis": "equity_delta",
                 }
@@ -1008,22 +1005,22 @@ class MarketService:
             try:
                 balance = self.exchange.call("fetch_balance")
             except Exception as exc:  # noqa: BLE001
-                self.logger.exception("Failed to fetch wallet balance")
-                message = str(exc).strip() or "Unable to fetch wallet balance"
+                self.logger.exception("Failed to fetch broker portfolio")
+                message = str(exc).strip() or "Unable to fetch broker portfolio"
                 payload = {
                     "enabled": True,
                     "connected": False,
                     "exchange": self.settings.exchange_name,
                     "updated_at": int(now),
                     "asset_count": 0,
-                    "total_usdt_estimate": None,
-                    "usdt_free": None,
-                    "usdt_total": None,
+                    "total_usd_estimate": None,
+                    "usd_free": None,
+                    "usd_total": None,
                     "assets": [],
                     "error": message[:220],
-                    "daily_pnl_estimate_usdt": None,
+                    "daily_pnl_estimate_usd": None,
                     "daily_pnl_estimate_pct": None,
-                    "day_start_total_usdt": None,
+                    "day_start_total_usd": None,
                     "pnl_day_key": None,
                     "pnl_basis": "equity_delta",
                 }
@@ -1043,7 +1040,7 @@ class MarketService:
 
             asset_codes = set(free_map.keys()) | set(used_map.keys()) | set(total_map.keys())
             assets: list[dict[str, Any]] = []
-            total_usdt_estimate = 0.0
+            total_usd_estimate = 0.0
 
             for asset_code in asset_codes:
                 asset = str(asset_code or "").upper()
@@ -1059,14 +1056,14 @@ class MarketService:
                 if total <= 0 and free <= 0 and used <= 0:
                     continue
 
-                price_usdt = (
+                price_usd = (
                     1.0
-                    if asset == "USDT"
-                    else safe_float(price_lookup.get(f"{asset}/USDT"))
+                    if asset == "USD"
+                    else safe_float(price_lookup.get(asset))
                 )
-                usdt_value = (total * price_usdt) if price_usdt is not None else None
-                if usdt_value is not None:
-                    total_usdt_estimate += usdt_value
+                usd_value = (total * price_usd) if price_usd is not None else None
+                if usd_value is not None:
+                    total_usd_estimate += usd_value
 
                 assets.append(
                     {
@@ -1074,41 +1071,41 @@ class MarketService:
                         "free": round(free, 8),
                         "used": round(used, 8),
                         "total": round(total, 8),
-                        "price_usdt": (
-                            round(price_usdt, 8) if price_usdt is not None else None
+                        "price_usd": (
+                            round(price_usd, 8) if price_usd is not None else None
                         ),
-                        "usdt_value": (
-                            round(usdt_value, 6) if usdt_value is not None else None
+                        "usd_value": (
+                            round(usd_value, 6) if usd_value is not None else None
                         ),
                     }
                 )
 
             assets.sort(
                 key=lambda item: (
-                    safe_float(item.get("usdt_value")) is not None,
-                    safe_float(item.get("usdt_value")) or 0.0,
+                    safe_float(item.get("usd_value")) is not None,
+                    safe_float(item.get("usd_value")) or 0.0,
                     safe_float(item.get("total")) or 0.0,
                 ),
                 reverse=True,
             )
 
-            usdt_entry = next((entry for entry in assets if entry.get("asset") == "USDT"), None)
+            usd_entry = next((entry for entry in assets if entry.get("asset") == "USD"), None)
             day_key = self.utc_day_key()
             if self.state.wallet_day_key != day_key:
                 self.state.wallet_day_key = day_key
-                self.state.wallet_day_start_total_usdt = (
-                    total_usdt_estimate if total_usdt_estimate > 0 else None
+                self.state.wallet_day_start_total_usd = (
+                    total_usd_estimate if total_usd_estimate > 0 else None
                 )
 
             if (
-                self.state.wallet_day_start_total_usdt is None
-                and total_usdt_estimate > 0
+                self.state.wallet_day_start_total_usd is None
+                and total_usd_estimate > 0
             ):
-                self.state.wallet_day_start_total_usdt = total_usdt_estimate
+                self.state.wallet_day_start_total_usd = total_usd_estimate
 
-            day_start_total = self.state.wallet_day_start_total_usdt
+            day_start_total = self.state.wallet_day_start_total_usd
             daily_pnl_estimate = (
-                total_usdt_estimate - day_start_total
+                total_usd_estimate - day_start_total
                 if day_start_total is not None
                 else None
             )
@@ -1124,12 +1121,12 @@ class MarketService:
                 "exchange": self.settings.exchange_name,
                 "updated_at": int(now),
                 "asset_count": len(assets),
-                "total_usdt_estimate": round(total_usdt_estimate, 2),
-                "usdt_free": (usdt_entry.get("free") if usdt_entry else 0.0),
-                "usdt_total": (usdt_entry.get("total") if usdt_entry else 0.0),
+                "total_usd_estimate": round(total_usd_estimate, 2),
+                "usd_free": (usd_entry.get("free") if usd_entry else 0.0),
+                "usd_total": (usd_entry.get("total") if usd_entry else 0.0),
                 "assets": assets[:25],
                 "error": None,
-                "daily_pnl_estimate_usdt": (
+                "daily_pnl_estimate_usd": (
                     round(daily_pnl_estimate, 2)
                     if daily_pnl_estimate is not None
                     else None
@@ -1139,7 +1136,7 @@ class MarketService:
                     if daily_pnl_pct is not None
                     else None
                 ),
-                "day_start_total_usdt": (
+                "day_start_total_usd": (
                     round(day_start_total, 2)
                     if day_start_total is not None
                     else None
@@ -1428,9 +1425,9 @@ class MarketService:
         if not stream_status.get("connected"):
             stream_error = str(stream_status.get("last_error") or "").strip()
             stream_message = (
-                f"Exchange stream reconnecting: {stream_error}"
+                f"Stock quote feed reconnecting: {stream_error}"
                 if stream_error
-                else "Exchange stream is connecting..."
+                else "Stock quote feed is connecting..."
             )
             snapshot_error = (
                 f"{snapshot_error} • {stream_message}" if snapshot_error else stream_message

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 
@@ -12,61 +13,63 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYMBOLS = [
-    "BTC/USDT",
-    "ETH/USDT",
-    "SOL/USDT",
-    "BNB/USDT",
-    "XRP/USDT",
-    "ADA/USDT",
-    "DOGE/USDT",
-    "TRX/USDT",
-    "AVAX/USDT",
-    "LINK/USDT",
-    "DOT/USDT",
-    "POL/USDT",
-    "LTC/USDT",
-    "BCH/USDT",
-    "XLM/USDT",
-    "ATOM/USDT",
-    "XMR/USDT",
-    "ETC/USDT",
-    "UNI/USDT",
-    "FIL/USDT",
-    "HBAR/USDT",
-    "NEAR/USDT",
-    "ICP/USDT",
-    "VET/USDT",
-    "CRO/USDT",
-    "ALGO/USDT",
-    "SUI/USDT",
-    "INJ/USDT",
-    "APT/USDT",
-    "OP/USDT",
-    "ARB/USDT",
-    "RNDR/USDT",
-    "IMX/USDT",
-    "STX/USDT",
-    "MKR/USDT",
-    "AAVE/USDT",
-    "THETA/USDT",
-    "EOS/USDT",
-    "EGLD/USDT",
-    "MANA/USDT",
-    "SAND/USDT",
-    "FTM/USDT",
-    "TIA/USDT",
-    "PEPE/USDT",
-    "SHIB/USDT",
-    "BONK/USDT",
-    "GRT/USDT",
-    "LDO/USDT",
-    "FLOW/USDT",
-    "SEI/USDT",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "TSLA",
+    "AMZN",
+    "META",
+    "GOOGL",
+    "AMD",
+    "AVGO",
+    "NFLX",
+    "JPM",
+    "BAC",
+    "WMT",
+    "COST",
+    "KO",
+    "DIS",
+    "PYPL",
+    "PLTR",
+    "SOFI",
+    "RIVN",
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
 ]
 ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
 FALLBACK_DEFAULT_TIMEFRAME = "1m"
 ALLOWED_AUTO_TRADE_MODES = {"long_only", "short_only", "both"}
 FALLBACK_AUTO_TRADE_MODE = "long_only"
+STOCK_SYMBOL_RE = re.compile(r"^[A-Z0-9.^-]{1,15}$")
+
+
+def normalize_stock_symbol(raw_symbol: str) -> str | None:
+    symbol = raw_symbol.strip().upper().replace(" ", "")
+    if not symbol or "/" in symbol:
+        return None
+    if not STOCK_SYMBOL_RE.match(symbol):
+        return None
+    return symbol
+
+
+def parse_market_data_provider(raw_value: str | None) -> str:
+    provider = (raw_value or "yahoo").strip().lower()
+    if provider in {"", "yahoo"}:
+        return "yahoo"
+    if provider in {"moomoo", "momostock", "momo", "futu"}:
+        return "moomoo"
+    logger.warning("Unsupported MARKET_DATA_PROVIDER=%s, using yahoo", provider)
+    return "yahoo"
+
+
+def parse_moomoo_market_prefix(raw_value: str | None) -> str:
+    prefix = (raw_value or "US").strip().upper()
+    if re.match(r"^[A-Z]{2,4}$", prefix):
+        return prefix
+    logger.warning("Invalid MOOMOO_MARKET_PREFIX=%s, using US", raw_value)
+    return "US"
 
 
 def parse_env_symbols(raw_value: str | None) -> list[str]:
@@ -77,7 +80,7 @@ def parse_env_symbols(raw_value: str | None) -> list[str]:
     seen: set[str] = set()
 
     for part in raw_value.split(","):
-        symbol = part.strip().upper()
+        symbol = normalize_stock_symbol(part)
         if not symbol or symbol in seen:
             continue
         symbols.append(symbol)
@@ -222,6 +225,14 @@ class Settings:
     default_timeframe: str
     stream_ssl_verify: bool
     stream_ssl_ca_bundle: str
+    moomoo_opend_host: str
+    moomoo_opend_port: int
+    moomoo_market_prefix: str
+    moomoo_extended_time: bool
+    moomoo_fallback_to_yahoo: bool
+    moomoo_log_home: str
+    moomoo_history_days_intraday: int
+    moomoo_history_days_daily: int
     api_key: str
     api_secret: str
     use_sandbox: bool
@@ -232,20 +243,20 @@ class Settings:
     auto_trade_enabled: bool
     paper_trading: bool
     paper_wallet_enabled: bool
-    paper_wallet_start_usdt: float
-    trade_size_usdt: float
+    paper_wallet_start_usd: float
+    trade_size_usd: float
     trade_size_percent: float
-    auto_trade_min_notional_usdt: float
+    auto_trade_min_notional_usd: float
     auto_trade_min_buffer_pct: float
     auto_trade_strategy_mode: str
     auto_trade_enable_short: bool
     auto_trade_max_open_positions: int
-    auto_trade_auto_convert_to_usdt: bool
-    auto_trade_auto_convert_min_usdt: float
+    auto_trade_auto_convert_to_usd: bool
+    auto_trade_auto_convert_min_usd: float
     auto_trade_auto_convert_interval_seconds: int
     auto_trade_symbol_validation_enabled: bool
-    trade_size_usdt_min: float
-    trade_size_usdt_max: float
+    trade_size_usd_min: float
+    trade_size_usd_max: float
     auto_trade_volatility_sizing_enabled: bool
     auto_trade_target_atr_pct: float
     auto_trade_volatility_size_min_mult: float
@@ -267,7 +278,7 @@ class Settings:
     auto_trade_extreme_volatility_exit_atr_pct: float
     auto_trade_extreme_volatility_exit_change_pct: float
     auto_trade_profit_lock_enabled: bool
-    auto_trade_profit_lock_trigger_usdt: float
+    auto_trade_profit_lock_trigger_usd: float
     auto_trade_profit_lock_giveback_pct: float
     auto_trade_profit_lock_pause_seconds: int
     auto_trade_profit_lock_risk_mult: float
@@ -278,7 +289,7 @@ class Settings:
     auto_trade_regime_risk_on_mult: float
     auto_trade_regime_risk_off_mult: float
     auto_trade_compounding_enabled: bool
-    auto_trade_compounding_profit_step_usdt: float
+    auto_trade_compounding_profit_step_usd: float
     auto_trade_compounding_max_mult: float
     auto_trade_entry_quality_enabled: bool
     auto_trade_min_entry_score: int
@@ -344,7 +355,7 @@ class Settings:
     auto_trade_cooldown_volatility_max_mult: float
     auto_trade_max_consecutive_losses: int
     auto_trade_kill_switch_pause_seconds: int
-    max_daily_loss_usdt: float
+    max_daily_loss_usd: float
     auto_trade_min_confidence: int
     ai_filter_enabled: bool
     ai_filter_min_confidence: int
@@ -372,7 +383,7 @@ class Settings:
     auto_trade_forward_guardrail_enabled: bool
     auto_trade_forward_guardrail_min_trades: int
     auto_trade_forward_baseline_win_rate: float
-    auto_trade_forward_baseline_avg_pnl_usdt: float
+    auto_trade_forward_baseline_avg_pnl_usd: float
     auto_trade_forward_guardrail_risk_mult: float
     auto_trade_forward_guardrail_severe_win_rate: float
     auto_trade_forward_guardrail_halt_enabled: bool
@@ -395,8 +406,8 @@ def load_settings() -> Settings:
     auto_trade_enabled = parse_env_bool(os.getenv("AUTO_TRADE_ENABLED"), False)
     paper_trading = parse_env_bool(os.getenv("PAPER_TRADING"), True)
     paper_wallet_enabled = parse_env_bool(os.getenv("PAPER_WALLET_ENABLED"), True)
-    paper_wallet_start_usdt = max(
-        parse_env_float(os.getenv("PAPER_WALLET_START_USDT"), 10000.0),
+    paper_wallet_start_usd = max(
+        parse_env_float(os.getenv("PAPER_WALLET_START_USD"), 10000.0),
         0.0,
     )
     api_key = (os.getenv("API_KEY") or "").strip()
@@ -415,6 +426,13 @@ def load_settings() -> Settings:
             "Telegram disabled."
         )
         telegram_enabled = False
+
+    if auto_trade_enabled and not paper_trading:
+        logger.warning(
+            "Live stock broker execution is not configured in this build. "
+            "Forcing PAPER_TRADING=true."
+        )
+        paper_trading = True
 
     requested_auto_trade_symbols = (
         parse_env_symbols(os.getenv("AUTO_TRADE_SYMBOLS"))
@@ -443,16 +461,16 @@ def load_settings() -> Settings:
         )
         auto_trade_enabled = False
 
-    base_trade_size_usdt = max(parse_env_float(os.getenv("TRADE_SIZE_USDT"), 20.0), 1.0)
-    trade_size_usdt_min = max(
-        parse_env_float(os.getenv("TRADE_SIZE_USDT_MIN"), base_trade_size_usdt),
+    base_trade_size_usd = max(parse_env_float(os.getenv("TRADE_SIZE_USD"), 20.0), 1.0)
+    trade_size_usd_min = max(
+        parse_env_float(os.getenv("TRADE_SIZE_USD_MIN"), base_trade_size_usd),
         1.0,
     )
-    trade_size_usdt_max = max(
-        parse_env_float(os.getenv("TRADE_SIZE_USDT_MAX"), trade_size_usdt_min),
-        trade_size_usdt_min,
+    trade_size_usd_max = max(
+        parse_env_float(os.getenv("TRADE_SIZE_USD_MAX"), trade_size_usd_min),
+        trade_size_usd_min,
     )
-    trade_size_usdt = min(max(base_trade_size_usdt, trade_size_usdt_min), trade_size_usdt_max)
+    trade_size_usd = min(max(base_trade_size_usd, trade_size_usd_min), trade_size_usd_max)
 
     base_stop_loss_pct = max(parse_env_float(os.getenv("STOP_LOSS_PCT"), 1.0), 0.1)
     base_take_profit_pct = max(parse_env_float(os.getenv("TAKE_PROFIT_PCT"), 2.0), 0.1)
@@ -507,12 +525,12 @@ def load_settings() -> Settings:
         if raw_auto_trade_max_open_positions <= 0
         else raw_auto_trade_max_open_positions
     )
-    auto_trade_auto_convert_to_usdt = parse_env_bool(
-        os.getenv("AUTO_TRADE_AUTO_CONVERT_TO_USDT"),
+    auto_trade_auto_convert_to_usd = parse_env_bool(
+        os.getenv("AUTO_TRADE_AUTO_CONVERT_TO_USD"),
         False,
     )
-    auto_trade_auto_convert_min_usdt = max(
-        parse_env_float(os.getenv("AUTO_TRADE_AUTO_CONVERT_MIN_USDT"), 3.0),
+    auto_trade_auto_convert_min_usd = max(
+        parse_env_float(os.getenv("AUTO_TRADE_AUTO_CONVERT_MIN_USD"), 3.0),
         0.0,
     )
     auto_trade_auto_convert_interval_seconds = max(
@@ -605,8 +623,8 @@ def load_settings() -> Settings:
         os.getenv("AUTO_TRADE_PROFIT_LOCK_ENABLED"),
         True,
     )
-    auto_trade_profit_lock_trigger_usdt = max(
-        parse_env_float(os.getenv("AUTO_TRADE_PROFIT_LOCK_TRIGGER_USDT"), 8.0),
+    auto_trade_profit_lock_trigger_usd = max(
+        parse_env_float(os.getenv("AUTO_TRADE_PROFIT_LOCK_TRIGGER_USD"), 8.0),
         0.0,
     )
     auto_trade_profit_lock_giveback_pct = min(
@@ -649,8 +667,8 @@ def load_settings() -> Settings:
         os.getenv("AUTO_TRADE_COMPOUNDING_ENABLED"),
         True,
     )
-    auto_trade_compounding_profit_step_usdt = max(
-        parse_env_float(os.getenv("AUTO_TRADE_COMPOUNDING_PROFIT_STEP_USDT"), 20.0),
+    auto_trade_compounding_profit_step_usd = max(
+        parse_env_float(os.getenv("AUTO_TRADE_COMPOUNDING_PROFIT_STEP_USD"), 20.0),
         0.01,
     )
     auto_trade_compounding_max_mult = max(
@@ -861,8 +879,8 @@ def load_settings() -> Settings:
         max(parse_env_float(os.getenv("AUTO_TRADE_FORWARD_BASELINE_WIN_RATE"), 0.5), 0.0),
         1.0,
     )
-    auto_trade_forward_baseline_avg_pnl_usdt = parse_env_float(
-        os.getenv("AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USDT"),
+    auto_trade_forward_baseline_avg_pnl_usd = parse_env_float(
+        os.getenv("AUTO_TRADE_FORWARD_BASELINE_AVG_PNL_USD"),
         0.0,
     )
     auto_trade_forward_guardrail_risk_mult = min(
@@ -955,7 +973,7 @@ def load_settings() -> Settings:
     )
 
     return Settings(
-        title="Nurix Trading Dashboard",
+        title="StockBot Dashboard",
         signal_timeframe=signal_timeframe,
         signal_candle_limit=120,
         chart_candle_limit=220,
@@ -973,13 +991,37 @@ def load_settings() -> Settings:
         wallet_cache_seconds=10,
         strength_timeframes=("1m", "5m", "15m"),
         auto_trade_max_events=120,
-        exchange_name=(os.getenv("EXCHANGE_NAME", "gateio") or "gateio").strip().lower(),
+        exchange_name=parse_market_data_provider(
+            os.getenv("MARKET_DATA_PROVIDER"),
+        ),
         symbols=symbols,
         default_symbol=default_symbol,
         allowed_timeframes=ALLOWED_TIMEFRAMES,
         default_timeframe=default_timeframe,
         stream_ssl_verify=parse_env_bool(os.getenv("STREAM_SSL_VERIFY"), True),
         stream_ssl_ca_bundle=(os.getenv("STREAM_SSL_CA_BUNDLE") or "").strip(),
+        moomoo_opend_host=(os.getenv("MOOMOO_OPEND_HOST") or "127.0.0.1").strip(),
+        moomoo_opend_port=max(
+            parse_env_int(os.getenv("MOOMOO_OPEND_PORT"), 11111),
+            1,
+        ),
+        moomoo_market_prefix=parse_moomoo_market_prefix(
+            os.getenv("MOOMOO_MARKET_PREFIX"),
+        ),
+        moomoo_extended_time=parse_env_bool(os.getenv("MOOMOO_EXTENDED_TIME"), False),
+        moomoo_fallback_to_yahoo=parse_env_bool(
+            os.getenv("MOOMOO_FALLBACK_TO_YAHOO"),
+            True,
+        ),
+        moomoo_log_home=(os.getenv("MOOMOO_LOG_HOME") or "data/moomoo").strip(),
+        moomoo_history_days_intraday=max(
+            parse_env_int(os.getenv("MOOMOO_HISTORY_DAYS_INTRADAY"), 30),
+            1,
+        ),
+        moomoo_history_days_daily=max(
+            parse_env_int(os.getenv("MOOMOO_HISTORY_DAYS_DAILY"), 730),
+            1,
+        ),
         api_key=api_key,
         api_secret=api_secret,
         use_sandbox=parse_env_bool(os.getenv("USE_SANDBOX"), False),
@@ -990,14 +1032,14 @@ def load_settings() -> Settings:
         auto_trade_enabled=auto_trade_enabled,
         paper_trading=paper_trading,
         paper_wallet_enabled=paper_wallet_enabled,
-        paper_wallet_start_usdt=paper_wallet_start_usdt,
-        trade_size_usdt=trade_size_usdt,
+        paper_wallet_start_usd=paper_wallet_start_usd,
+        trade_size_usd=trade_size_usd,
         trade_size_percent=min(
             max(parse_env_float(os.getenv("TRADE_SIZE_PERCENT"), 0.0), 0.0),
             100.0,
         ),
-        auto_trade_min_notional_usdt=max(
-            parse_env_float(os.getenv("AUTO_TRADE_MIN_NOTIONAL_USDT"), 3.0),
+        auto_trade_min_notional_usd=max(
+            parse_env_float(os.getenv("AUTO_TRADE_MIN_NOTIONAL_USD"), 3.0),
             1.0,
         ),
         auto_trade_min_buffer_pct=max(
@@ -1007,12 +1049,12 @@ def load_settings() -> Settings:
         auto_trade_strategy_mode=auto_trade_strategy_mode,
         auto_trade_enable_short=auto_trade_enable_short,
         auto_trade_max_open_positions=auto_trade_max_open_positions,
-        auto_trade_auto_convert_to_usdt=auto_trade_auto_convert_to_usdt,
-        auto_trade_auto_convert_min_usdt=auto_trade_auto_convert_min_usdt,
+        auto_trade_auto_convert_to_usd=auto_trade_auto_convert_to_usd,
+        auto_trade_auto_convert_min_usd=auto_trade_auto_convert_min_usd,
         auto_trade_auto_convert_interval_seconds=auto_trade_auto_convert_interval_seconds,
         auto_trade_symbol_validation_enabled=auto_trade_symbol_validation_enabled,
-        trade_size_usdt_min=trade_size_usdt_min,
-        trade_size_usdt_max=trade_size_usdt_max,
+        trade_size_usd_min=trade_size_usd_min,
+        trade_size_usd_max=trade_size_usd_max,
         auto_trade_volatility_sizing_enabled=auto_trade_volatility_sizing_enabled,
         auto_trade_target_atr_pct=auto_trade_target_atr_pct,
         auto_trade_volatility_size_min_mult=auto_trade_volatility_size_min_mult,
@@ -1034,7 +1076,7 @@ def load_settings() -> Settings:
         auto_trade_extreme_volatility_exit_atr_pct=auto_trade_extreme_volatility_exit_atr_pct,
         auto_trade_extreme_volatility_exit_change_pct=auto_trade_extreme_volatility_exit_change_pct,
         auto_trade_profit_lock_enabled=auto_trade_profit_lock_enabled,
-        auto_trade_profit_lock_trigger_usdt=auto_trade_profit_lock_trigger_usdt,
+        auto_trade_profit_lock_trigger_usd=auto_trade_profit_lock_trigger_usd,
         auto_trade_profit_lock_giveback_pct=auto_trade_profit_lock_giveback_pct,
         auto_trade_profit_lock_pause_seconds=auto_trade_profit_lock_pause_seconds,
         auto_trade_profit_lock_risk_mult=auto_trade_profit_lock_risk_mult,
@@ -1045,7 +1087,7 @@ def load_settings() -> Settings:
         auto_trade_regime_risk_on_mult=auto_trade_regime_risk_on_mult,
         auto_trade_regime_risk_off_mult=auto_trade_regime_risk_off_mult,
         auto_trade_compounding_enabled=auto_trade_compounding_enabled,
-        auto_trade_compounding_profit_step_usdt=auto_trade_compounding_profit_step_usdt,
+        auto_trade_compounding_profit_step_usd=auto_trade_compounding_profit_step_usd,
         auto_trade_compounding_max_mult=auto_trade_compounding_max_mult,
         auto_trade_entry_quality_enabled=auto_trade_entry_quality_enabled,
         auto_trade_min_entry_score=auto_trade_min_entry_score,
@@ -1111,8 +1153,8 @@ def load_settings() -> Settings:
         auto_trade_cooldown_volatility_max_mult=auto_trade_cooldown_volatility_max_mult,
         auto_trade_max_consecutive_losses=auto_trade_max_consecutive_losses,
         auto_trade_kill_switch_pause_seconds=auto_trade_kill_switch_pause_seconds,
-        max_daily_loss_usdt=max(
-            parse_env_float(os.getenv("MAX_DAILY_LOSS_USDT"), 50.0),
+        max_daily_loss_usd=max(
+            parse_env_float(os.getenv("MAX_DAILY_LOSS_USD"), 50.0),
             1.0,
         ),
         auto_trade_min_confidence=min(
@@ -1157,7 +1199,7 @@ def load_settings() -> Settings:
         auto_trade_forward_guardrail_enabled=auto_trade_forward_guardrail_enabled,
         auto_trade_forward_guardrail_min_trades=auto_trade_forward_guardrail_min_trades,
         auto_trade_forward_baseline_win_rate=auto_trade_forward_baseline_win_rate,
-        auto_trade_forward_baseline_avg_pnl_usdt=auto_trade_forward_baseline_avg_pnl_usdt,
+        auto_trade_forward_baseline_avg_pnl_usd=auto_trade_forward_baseline_avg_pnl_usd,
         auto_trade_forward_guardrail_risk_mult=auto_trade_forward_guardrail_risk_mult,
         auto_trade_forward_guardrail_severe_win_rate=auto_trade_forward_guardrail_severe_win_rate,
         auto_trade_forward_guardrail_halt_enabled=auto_trade_forward_guardrail_halt_enabled,

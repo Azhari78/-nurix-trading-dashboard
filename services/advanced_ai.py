@@ -22,7 +22,7 @@ def _empty_stats() -> dict[str, Any]:
         "predictions": 0,
         "correct": 0,
         "wrong": 0,
-        "pnl_usdt": 0.0,
+        "pnl_usd": 0.0,
         "weight": 1.0,
     }
 
@@ -69,7 +69,7 @@ class AdvancedDecisionEngine:
             stats = stats_map.get(name, {})
             predictions = int(safe_float(stats.get("predictions")) or 0)
             correct = int(safe_float(stats.get("correct")) or 0)
-            pnl = float(safe_float(stats.get("pnl_usdt")) or 0.0)
+            pnl = float(safe_float(stats.get("pnl_usd")) or 0.0)
             win_rate = (correct / predictions) if predictions > 0 else 0.5
             sample_factor = min(1.0, predictions / 20.0)
             pnl_factor = self._clamp(pnl / max(1.0, predictions * 2.0), -0.35, 0.35)
@@ -337,7 +337,7 @@ def update_advanced_model_stats(
     decision_payload: dict[str, Any] | None,
     *,
     position_side: str,
-    pnl_usdt: float,
+    pnl_usd: float,
 ) -> None:
     if not isinstance(decision_payload, dict):
         return
@@ -348,8 +348,8 @@ def update_advanced_model_stats(
 
     stats_map = ensure_model_stats(state)
     side = str(position_side or "LONG").upper()
-    actual_bias = "BUY" if (side == "LONG") == (pnl_usdt >= 0) else "SELL"
-    pnl_abs = abs(float(pnl_usdt))
+    actual_bias = "BUY" if (side == "LONG") == (pnl_usd >= 0) else "SELL"
+    pnl_abs = abs(float(pnl_usd))
 
     for model in models:
         if not isinstance(model, dict):
@@ -366,10 +366,10 @@ def update_advanced_model_stats(
         correct = bias == actual_bias
         if correct:
             stats["correct"] = int(safe_float(stats.get("correct")) or 0) + 1
-            stats["pnl_usdt"] = float(safe_float(stats.get("pnl_usdt")) or 0.0) + pnl_abs
+            stats["pnl_usd"] = float(safe_float(stats.get("pnl_usd")) or 0.0) + pnl_abs
         else:
             stats["wrong"] = int(safe_float(stats.get("wrong")) or 0) + 1
-            stats["pnl_usdt"] = float(safe_float(stats.get("pnl_usdt")) or 0.0) - pnl_abs
+            stats["pnl_usd"] = float(safe_float(stats.get("pnl_usd")) or 0.0) - pnl_abs
 
 
 def build_time_series_cv_report(
@@ -381,11 +381,11 @@ def build_time_series_cv_report(
         row
         for row in journal_rows
         if row.get("event_type") in {"EXIT", "PARTIAL_EXIT"}
-        and safe_float(row.get("pnl_usdt")) is not None
+        and safe_float(row.get("pnl_usd")) is not None
     ]
     realized.sort(key=lambda row: int(row.get("timestamp") or 0))
     if not realized:
-        return {"folds": [], "trade_count": 0, "win_rate": 0.0, "pnl_usdt": 0.0}
+        return {"folds": [], "trade_count": 0, "win_rate": 0.0, "pnl_usd": 0.0}
 
     fold_count = max(1, min(int(folds), len(realized)))
     fold_size = max(1, math.ceil(len(realized) / fold_count))
@@ -397,7 +397,7 @@ def build_time_series_cv_report(
         rows = realized[index * fold_size : (index + 1) * fold_size]
         if not rows:
             continue
-        pnl_values = [float(safe_float(row.get("pnl_usdt")) or 0.0) for row in rows]
+        pnl_values = [float(safe_float(row.get("pnl_usd")) or 0.0) for row in rows]
         wins = sum(1 for pnl in pnl_values if pnl >= 0)
         total_wins += wins
         total_pnl += sum(pnl_values)
@@ -408,7 +408,7 @@ def build_time_series_cv_report(
                 "end_ts": int(rows[-1].get("timestamp") or 0),
                 "trades": len(rows),
                 "win_rate": round(wins / len(rows), 4),
-                "pnl_usdt": round(sum(pnl_values), 4),
+                "pnl_usd": round(sum(pnl_values), 4),
             }
         )
 
@@ -416,5 +416,5 @@ def build_time_series_cv_report(
         "folds": report_folds,
         "trade_count": len(realized),
         "win_rate": round(total_wins / len(realized), 4),
-        "pnl_usdt": round(total_pnl, 4),
+        "pnl_usd": round(total_pnl, 4),
     }

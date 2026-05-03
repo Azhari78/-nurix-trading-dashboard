@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nurix Trading Dashboard</title>
+  <title>StockBot Dashboard</title>
   <style>
     :root {
       --bg: #020816;
@@ -334,29 +334,7 @@
       align-items: start;
     }
 
-    .orderflow-grid {
-      display: grid;
-      gap: 10px;
-      grid-template-columns: 1.2fr 1fr;
-      align-items: start;
-    }
-
-    .orderflow-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .orderflow-meta {
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .orderflow-error {
+    .inline-error {
       margin-bottom: 10px;
       border: 1px solid rgba(255, 91, 91, 0.45);
       background: rgba(255, 91, 91, 0.12);
@@ -368,36 +346,8 @@
       display: none;
     }
 
-    .orderflow-error.show {
+    .inline-error.show {
       display: block;
-    }
-
-    .orderbook-grid {
-      display: grid;
-      gap: 10px;
-      grid-template-columns: 1fr 1fr;
-    }
-
-    .orderbook-box,
-    .trades-box {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      background: #0a142b;
-    }
-
-    .mini-head {
-      margin: 0;
-      padding: 8px 10px;
-      font-size: 12px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      letter-spacing: 0.3px;
-    }
-
-    .mini-wrap {
-      max-height: 300px;
-      overflow: auto;
     }
 
     .mini-table {
@@ -433,16 +383,6 @@
       padding: 10px;
       font-size: 12px;
       color: var(--muted);
-    }
-
-    .side-buy {
-      color: var(--green);
-      font-weight: 700;
-    }
-
-    .side-sell {
-      color: var(--red);
-      font-weight: 700;
     }
 
     .chart-stack {
@@ -577,57 +517,6 @@
     .chart-overlay-chip.neg {
       color: var(--red);
       border-color: rgba(255, 91, 91, 0.45);
-    }
-
-    .chart-orderflow-mini {
-      position: absolute;
-      right: 8px;
-      bottom: 8px;
-      z-index: 4;
-      width: min(280px, 50%);
-      border: 1px solid rgba(148, 163, 184, 0.32);
-      border-radius: 10px;
-      background: rgba(6, 13, 27, 0.88);
-      backdrop-filter: blur(3px);
-      padding: 8px;
-    }
-
-    .chart-orderflow-mini.hidden {
-      display: none;
-    }
-
-    .chart-mini-head {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--muted);
-      margin-bottom: 6px;
-      letter-spacing: 0.2px;
-    }
-
-    .chart-mini-grid {
-      display: grid;
-      gap: 6px;
-      grid-template-columns: 1fr 1fr;
-    }
-
-    .chart-mini-item {
-      border: 1px solid rgba(148, 163, 184, 0.22);
-      border-radius: 8px;
-      background: rgba(11, 19, 40, 0.75);
-      padding: 6px;
-    }
-
-    .chart-mini-item .k {
-      display: block;
-      font-size: 10px;
-      color: var(--muted);
-      margin-bottom: 2px;
-      letter-spacing: 0.2px;
-    }
-
-    .chart-mini-item .v {
-      font-size: 12px;
-      font-weight: 700;
     }
 
     .chart-mtf-ribbon {
@@ -1079,10 +968,6 @@
         grid-template-columns: 1fr;
       }
 
-      .orderflow-grid {
-        grid-template-columns: 1fr;
-      }
-
       .movers-grid {
         grid-template-columns: 1fr;
       }
@@ -1137,10 +1022,6 @@
         grid-template-columns: repeat(2, minmax(100px, 1fr));
       }
 
-      .orderbook-grid {
-        grid-template-columns: 1fr;
-      }
-
       .auto-trade-grid {
         grid-template-columns: 1fr;
       }
@@ -1151,10 +1032,6 @@
 
       .builder-grid {
         grid-template-columns: 1fr;
-      }
-
-      .chart-orderflow-mini {
-        width: calc(100% - 16px);
       }
 
       .chart-overlay,
@@ -1190,21 +1067,21 @@
   <main class="app">
     <section class="panel topbar">
       <div class="brand">
-        <img class="brand-logo" src="/static/nurix-logo.png" alt="Nurix logo" />
+        <img class="brand-logo" src="/static/stockbot-logo.png" alt="StockBot logo" />
         <div>
-          <h1 class="title">Nurix Pro Dashboard</h1>
-          <p class="sub">WebSocket live stream • multi-symbol watchlist • chart + RSI + MACD • Powered by Nurix</p>
+          <h1 class="title">StockBot Dashboard</h1>
+          <p class="sub">Stock quotes • watchlist • chart + RSI + MACD • paper trading</p>
         </div>
       </div>
       <div class="status-wrap">
         <div><span id="status-dot"></span><span id="status">Connecting...</span></div>
-        <div id="last-update">Waiting for stream...</div>
+        <div id="last-update">Waiting for quote feed...</div>
       </div>
     </section>
 
     <section id="stream-banner" class="stream-banner info">
-      <span>Live Stream:</span>
-      <span id="stream-banner-text">Connecting to live stream...</span>
+      <span>Quote Feed:</span>
+      <span id="stream-banner-text">Connecting to quote feed...</span>
     </section>
 
     <section class="panel toolbar">
@@ -1246,7 +1123,6 @@
       <article class="stat"><span class="label">Signal Strength</span><span class="value" id="stat-strength">-</span></article>
       <article class="stat"><span class="label">Quantum</span><span class="value" id="stat-quantum">-</span></article>
       <article class="stat"><span class="label">Sentiment</span><span class="value" id="stat-sentiment">-</span></article>
-      <article class="stat"><span class="label">Microstructure</span><span class="value" id="stat-microstructure">-</span></article>
     </section>
 
     <section class="movers-grid" data-view-group="overview">
@@ -1287,9 +1163,6 @@
         <div class="price-chart-wrap">
           <div id="price-chart"></div>
           <div class="chart-overlay">
-            <span class="chart-overlay-chip" id="chart-ov-spread">Spread: -</span>
-            <span class="chart-overlay-chip" id="chart-ov-edge">Edge L/S: -</span>
-            <span class="chart-overlay-chip" id="chart-ov-rank">Rank L/S: -</span>
             <span class="chart-overlay-chip" id="chart-ov-sr">S/R: -</span>
             <span class="chart-overlay-chip" id="chart-ov-trend">Trendline: -</span>
           </div>
@@ -1298,15 +1171,6 @@
             <span class="mtf-chip mtf-hold" id="chart-mtf-5m">5m -</span>
             <span class="mtf-chip mtf-hold" id="chart-mtf-15m">15m -</span>
             <span class="mtf-chip mtf-hold" id="chart-mtf-align">MTF -</span>
-          </div>
-          <div class="chart-orderflow-mini" id="chart-orderflow-mini">
-            <div class="chart-mini-head">Entry Timing (Mini Tape)</div>
-            <div class="chart-mini-grid">
-              <article class="chart-mini-item"><span class="k">Spread</span><span class="v" id="chart-mini-spread">-</span></article>
-              <article class="chart-mini-item"><span class="k">Imbalance</span><span class="v" id="chart-mini-imbalance">-</span></article>
-              <article class="chart-mini-item"><span class="k">Tape Flow</span><span class="v" id="chart-mini-tape">-</span></article>
-              <article class="chart-mini-item"><span class="k">Pressure</span><span class="v" id="chart-mini-pressure">-</span></article>
-            </div>
           </div>
         </div>
         <div class="subcharts">
@@ -1340,81 +1204,14 @@
       </section>
     </section>
 
-    <section class="panel" data-view-group="overview">
-      <div class="orderflow-head">
-        <h3 class="tool-title">Order Book + Recent Trades (<span id="orderflow-symbol">-</span>)</h3>
-        <div class="orderflow-meta" id="orderflow-meta">Spread: -</div>
-      </div>
-      <div class="orderflow-error" id="orderflow-error">Order flow data unavailable.</div>
-      <div class="orderflow-grid">
-        <div class="orderbook-grid">
-          <section class="orderbook-box">
-            <h4 class="mini-head">Bids</h4>
-            <div class="mini-wrap">
-              <table class="mini-table">
-                <thead>
-                  <tr>
-                    <th>Price</th>
-                    <th>Amount</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody id="orderbook-bids-body">
-                  <tr><td colspan="3" class="mini-empty">Waiting for data...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="orderbook-box">
-            <h4 class="mini-head">Asks</h4>
-            <div class="mini-wrap">
-              <table class="mini-table">
-                <thead>
-                  <tr>
-                    <th>Price</th>
-                    <th>Amount</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody id="orderbook-asks-body">
-                  <tr><td colspan="3" class="mini-empty">Waiting for data...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-
-        <section class="trades-box">
-          <h4 class="mini-head">Recent Trades</h4>
-          <div class="mini-wrap">
-            <table class="mini-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Side</th>
-                  <th>Price</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody id="recent-trades-body">
-                <tr><td colspan="4" class="mini-empty">Waiting for data...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </section>
-
     <section class="tools-grid tools-grid-balanced" data-view-group="signals">
       <section class="panel">
-        <h3 class="tool-title">Execution Checklist (Live)</h3>
+        <h3 class="tool-title">Execution Checklist</h3>
         <div class="risk-results">
           <article class="result-box"><span class="k">Market State</span><span class="v" id="exec-out-market-state">-</span></article>
           <article class="result-box"><span class="k">AI Gate</span><span class="v" id="exec-out-ai-gate">-</span></article>
           <article class="result-box"><span class="k">Quantum Engine</span><span class="v" id="exec-out-quantum">-</span></article>
           <article class="result-box"><span class="k">Sentiment Gate</span><span class="v" id="exec-out-sentiment">-</span></article>
-          <article class="result-box"><span class="k">Microstructure Gate</span><span class="v" id="exec-out-microstructure">-</span></article>
           <article class="result-box"><span class="k">Strength Gate</span><span class="v" id="exec-out-strength-gate">-</span></article>
           <article class="result-box"><span class="k">Volume Gate</span><span class="v" id="exec-out-volume-gate">-</span></article>
           <article class="result-box"><span class="k">EMA Gate</span><span class="v" id="exec-out-ema-gate">-</span></article>
@@ -1538,7 +1335,6 @@
           <div class="alert-controls">
             <button id="preset-toggle-sr" class="toggle-btn active" type="button">S/R ON</button>
             <button id="preset-toggle-trend" class="toggle-btn active" type="button">Trend ON</button>
-            <button id="preset-toggle-mini" class="toggle-btn active" type="button">Mini Tape ON</button>
           </div>
           <div class="alert-controls">
             <button id="preset-save-btn" class="toggle-btn" type="button">Save</button>
@@ -1569,40 +1365,40 @@
     </section>
 
     <section class="panel" data-view-group="trading">
-      <h3 class="tool-title">Wallet (Spot)</h3>
-      <div class="orderflow-error" id="wallet-error">Wallet data unavailable.</div>
+      <h3 class="tool-title">Paper Portfolio</h3>
+      <div class="inline-error" id="wallet-error">Portfolio data unavailable.</div>
       <div class="wallet-grid">
         <article class="auto-box"><span class="k">Status</span><span class="v" id="wallet-status">Waiting...</span></article>
-        <article class="auto-box"><span class="k">Exchange</span><span class="v" id="wallet-exchange">-</span></article>
-        <article class="auto-box"><span class="k">Est. Total</span><span class="v" id="wallet-total-usdt">-</span></article>
+        <article class="auto-box"><span class="k">Provider</span><span class="v" id="wallet-exchange">-</span></article>
+        <article class="auto-box"><span class="k">Est. Total</span><span class="v" id="wallet-total-usd">-</span></article>
         <article class="auto-box"><span class="k">Today PnL (Est., UTC)</span><span class="v" id="wallet-daily-pnl">-</span></article>
         <article class="auto-box"><span class="k">Day Start (Est.)</span><span class="v" id="wallet-day-start">-</span></article>
-        <article class="auto-box"><span class="k">USDT Free / Total</span><span class="v" id="wallet-usdt">-</span></article>
-        <article class="auto-box"><span class="k">Assets</span><span class="v" id="wallet-asset-count">-</span></article>
+        <article class="auto-box"><span class="k">Cash Free / Total</span><span class="v" id="wallet-usd">-</span></article>
+        <article class="auto-box"><span class="k">Positions</span><span class="v" id="wallet-asset-count">-</span></article>
       </div>
       <div class="auto-table-wrap">
         <table class="mini-table">
           <thead>
             <tr>
-              <th>Asset</th>
+              <th>Ticker</th>
               <th>Free</th>
               <th>Used</th>
               <th>Total</th>
-              <th>Est. USDT</th>
+              <th>Est. USD</th>
             </tr>
           </thead>
           <tbody id="wallet-assets-body">
-            <tr><td colspan="5" class="mini-empty">Waiting for wallet data...</td></tr>
+            <tr><td colspan="5" class="mini-empty">Waiting for portfolio data...</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <section class="panel" data-view-group="trading">
-      <h3 class="tool-title">Auto Trade Engine</h3>
+      <h3 class="tool-title">Paper Trade Engine</h3>
       <div class="auto-trade-grid">
         <article class="auto-box"><span class="k">Status</span><span class="v" id="auto-trade-status">Disabled</span></article>
-        <article class="auto-box"><span class="k">Mode / Exchange</span><span class="v" id="auto-trade-mode">-</span></article>
+        <article class="auto-box"><span class="k">Mode / Provider</span><span class="v" id="auto-trade-mode">-</span></article>
         <article class="auto-box"><span class="k">Daily PnL</span><span class="v" id="auto-trade-pnl">-</span></article>
         <article class="auto-box"><span class="k">Risk / Open</span><span class="v" id="auto-trade-risk">-</span></article>
       </div>
@@ -1611,7 +1407,6 @@
         <article class="auto-box"><span class="k">Selected Position</span><span class="v mono" id="auto-trade-selected">-</span></article>
         <article class="auto-box"><span class="k">Engine Note</span><span class="v" id="auto-trade-note">-</span></article>
         <article class="auto-box"><span class="k">Adaptive Profile</span><span class="v" id="auto-trade-adaptive">-</span></article>
-        <article class="auto-box"><span class="k">Copy Trade</span><span class="v mono" id="auto-trade-copy">-</span></article>
         <article class="auto-box"><span class="k">Advanced Risk</span><span class="v" id="auto-trade-advanced-risk">-</span></article>
         <article class="auto-box"><span class="k">Performance</span><span class="v" id="auto-trade-performance">-</span></article>
         <article class="auto-box"><span class="k">Regime</span><span class="v" id="auto-trade-regime">-</span></article>
@@ -1647,22 +1442,6 @@
           </tbody>
         </table>
       </div>
-      <div class="auto-table-wrap" style="margin-top:10px;">
-        <table class="mini-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Follower</th>
-              <th>Symbol</th>
-              <th>Action</th>
-              <th>PnL</th>
-            </tr>
-          </thead>
-          <tbody id="copy-trade-events">
-            <tr><td colspan="5" class="mini-empty">No copy-trade events yet.</td></tr>
-          </tbody>
-        </table>
-      </div>
       <div class="table-actions">
         <button id="export-journal-csv" class="toggle-btn" type="button">Export Journal CSV</button>
       </div>
@@ -1675,7 +1454,7 @@
               <th>Event</th>
               <th>Side</th>
               <th>Price</th>
-              <th>Qty</th>
+              <th>Shares</th>
               <th>Notional</th>
               <th>PnL</th>
               <th>Reason</th>

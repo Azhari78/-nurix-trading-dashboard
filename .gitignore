@@ -9,5 +9,6 @@ __pycache__/
 
 # Runtime persistence file for local dashboard state.
 data/auto_trade_state.json
+data/moomoo/
 data/recovered_*.csv
 data/recovered_*.json

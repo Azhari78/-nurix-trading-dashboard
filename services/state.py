@@ -24,9 +24,9 @@ class RuntimeState:
         self.wallet_lock = threading.Lock()
         self.auto_trade_lock = threading.Lock()
         self.paper_wallet_initialized = False
-        self.paper_wallet_free_usdt = 0.0
-        self.paper_wallet_used_usdt = 0.0
-        self.paper_wallet_realized_pnl_usdt = 0.0
+        self.paper_wallet_free_usd = 0.0
+        self.paper_wallet_used_usd = 0.0
+        self.paper_wallet_realized_pnl_usd = 0.0
 
         self.auto_trade_events: deque[dict[str, Any]] = deque(maxlen=auto_trade_max_events)
         self.auto_trade_counter = 0
@@ -48,8 +48,8 @@ class RuntimeState:
         self.auto_trade_profit_lock_day: str | None = None
         self.auto_trade_profit_lock_active = False
         self.auto_trade_profit_lock_reason = ""
-        self.auto_trade_daily_peak_pnl_usdt = 0.0
-        self.auto_trade_peak_equity_usdt = 0.0
+        self.auto_trade_daily_peak_pnl_usd = 0.0
+        self.auto_trade_peak_equity_usd = 0.0
         self.auto_trade_current_drawdown_pct = 0.0
         self.auto_trade_max_drawdown_pct = 0.0
         self.auto_trade_last_reason = "Waiting for market conditions"
@@ -82,4 +82,4 @@ class RuntimeState:
         self.markets_loaded = False
 
         self.wallet_day_key: str | None = None
-        self.wallet_day_start_total_usdt: float | None = None
+        self.wallet_day_start_total_usd: float | None = None

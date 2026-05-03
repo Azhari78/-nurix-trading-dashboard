@@ -20,16 +20,9 @@ const statSignal = document.getElementById("stat-signal");
 const statStrength = document.getElementById("stat-strength");
 const statQuantum = document.getElementById("stat-quantum");
 const statSentiment = document.getElementById("stat-sentiment");
-const statMicrostructure = document.getElementById("stat-microstructure");
 const moversGainersNode = document.getElementById("movers-gainers");
 const moversLosersNode = document.getElementById("movers-losers");
 const moversVolumeNode = document.getElementById("movers-volume");
-const orderflowSymbolNode = document.getElementById("orderflow-symbol");
-const orderflowMetaNode = document.getElementById("orderflow-meta");
-const orderflowErrorNode = document.getElementById("orderflow-error");
-const orderbookBidsBody = document.getElementById("orderbook-bids-body");
-const orderbookAsksBody = document.getElementById("orderbook-asks-body");
-const recentTradesBody = document.getElementById("recent-trades-body");
 
 const priceChartContainer = document.getElementById("price-chart");
 const rsiChartContainer = document.getElementById("rsi-chart");
@@ -51,17 +44,11 @@ const chartMtf1mNode = document.getElementById("chart-mtf-1m");
 const chartMtf5mNode = document.getElementById("chart-mtf-5m");
 const chartMtf15mNode = document.getElementById("chart-mtf-15m");
 const chartMtfAlignNode = document.getElementById("chart-mtf-align");
-const chartOrderflowMiniNode = document.getElementById("chart-orderflow-mini");
-const chartMiniSpreadNode = document.getElementById("chart-mini-spread");
-const chartMiniImbalanceNode = document.getElementById("chart-mini-imbalance");
-const chartMiniTapeNode = document.getElementById("chart-mini-tape");
-const chartMiniPressureNode = document.getElementById("chart-mini-pressure");
 
 const execOutMarketState = document.getElementById("exec-out-market-state");
 const execOutAiGate = document.getElementById("exec-out-ai-gate");
 const execOutQuantum = document.getElementById("exec-out-quantum");
 const execOutSentiment = document.getElementById("exec-out-sentiment");
-const execOutMicrostructure = document.getElementById("exec-out-microstructure");
 const execOutStrengthGate = document.getElementById("exec-out-strength-gate");
 const execOutVolumeGate = document.getElementById("exec-out-volume-gate");
 const execOutEmaGate = document.getElementById("exec-out-ema-gate");
@@ -118,7 +105,6 @@ const presetNameNode = document.getElementById("preset-name");
 const presetSelectNode = document.getElementById("preset-select");
 const presetToggleSrBtn = document.getElementById("preset-toggle-sr");
 const presetToggleTrendBtn = document.getElementById("preset-toggle-trend");
-const presetToggleMiniBtn = document.getElementById("preset-toggle-mini");
 const presetSaveBtn = document.getElementById("preset-save-btn");
 const presetLoadBtn = document.getElementById("preset-load-btn");
 const presetDeleteBtn = document.getElementById("preset-delete-btn");
@@ -132,23 +118,21 @@ const autoTradeSymbolsNode = document.getElementById("auto-trade-symbols");
 const autoTradeSelectedNode = document.getElementById("auto-trade-selected");
 const autoTradeNoteNode = document.getElementById("auto-trade-note");
 const autoTradeAdaptiveNode = document.getElementById("auto-trade-adaptive");
-const autoTradeCopyNode = document.getElementById("auto-trade-copy");
 const autoTradeAdvancedRiskNode = document.getElementById("auto-trade-advanced-risk");
 const autoTradePerformanceNode = document.getElementById("auto-trade-performance");
 const autoTradeRegimeNode = document.getElementById("auto-trade-regime");
 const autoTradeLearningNode = document.getElementById("auto-trade-learning");
 const autoTradeEventsNode = document.getElementById("auto-trade-events");
 const autoTradeDailyPnlHistoryNode = document.getElementById("auto-trade-daily-pnl-history");
-const copyTradeEventsNode = document.getElementById("copy-trade-events");
 const tradeJournalBody = document.getElementById("trade-journal-body");
 const exportJournalCsvBtn = document.getElementById("export-journal-csv");
 
 const walletStatusNode = document.getElementById("wallet-status");
 const walletExchangeNode = document.getElementById("wallet-exchange");
-const walletTotalNode = document.getElementById("wallet-total-usdt");
+const walletTotalNode = document.getElementById("wallet-total-usd");
 const walletDailyPnlNode = document.getElementById("wallet-daily-pnl");
 const walletDayStartNode = document.getElementById("wallet-day-start");
-const walletUsdtNode = document.getElementById("wallet-usdt");
+const walletUsdNode = document.getElementById("wallet-usd");
 const walletAssetCountNode = document.getElementById("wallet-asset-count");
 const walletErrorNode = document.getElementById("wallet-error");
 const walletAssetsBody = document.getElementById("wallet-assets-body");
@@ -159,7 +143,7 @@ let staleTimer = null;
 let reconnectAttempt = 0;
 let lastSnapshotAt = 0;
 
-let selectedSymbol = "BTC/USDT";
+let selectedSymbol = "AAPL";
 let selectedTimeframe = "1m";
 let marketRows = [];
 let currentSummary = null;
@@ -167,7 +151,6 @@ let latestAutoTrade = {};
 let latestChartPayload = null;
 let latestLiveChartPayload = null;
 let latestChartTimeframe = "1m";
-let latestOrderflowPayload = null;
 let chartPriceLines = [];
 let crosshairSyncGuard = false;
 let chartSeriesLookup = {
@@ -216,7 +199,6 @@ let replayState = {
 const chartDisplaySettings = {
   showSr: true,
   showTrend: true,
-  showMiniTape: true,
 };
 let dashboardViewMode = "overview";
 
@@ -252,9 +234,9 @@ const CHART_CLEAN_MODE = {
   showTp1Guide: false,
   showBreakEvenGuide: false,
 };
-const DASHBOARD_VIEW_MODE_KEY = "nurix.dashboard.view.mode.v1";
-const ALERT_BUILDER_RULES_KEY = "nurix.alert.builder.rules.v1";
-const CHART_PRESETS_KEY = "nurix.chart.presets.v1";
+const DASHBOARD_VIEW_MODE_KEY = "stockbot.dashboard.view.mode.v1";
+const ALERT_BUILDER_RULES_KEY = "stockbot.alert.builder.rules.v1";
+const CHART_PRESETS_KEY = "stockbot.chart.presets.v1";
 const ALERT_BUILDER_RULE_OPTIONS = {
   ema_cross: [
     { value: "bull_cross", label: "EMA20 cross above EMA50" },
@@ -523,14 +505,14 @@ function fmtMoney(value) {
   }).format(Number(value));
 }
 
-function fmtPnlUsdt(value) {
+function fmtPnlUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const num = Number(value);
   const abs = Math.abs(num);
-  if (abs < 1e-9) return "0.00 USDT";
-  if (abs >= 1) return `${num.toFixed(2)} USDT`;
-  if (abs >= 0.01) return `${num.toFixed(4)} USDT`;
-  return `${num.toFixed(6)} USDT`;
+  if (abs < 1e-9) return "0.00 USD";
+  if (abs >= 1) return `${num.toFixed(2)} USD`;
+  if (abs >= 0.01) return `${num.toFixed(4)} USD`;
+  return `${num.toFixed(6)} USD`;
 }
 
 function fmtQty(value) {
@@ -582,7 +564,7 @@ function scheduleStaleCheck() {
       const ageSeconds = Math.floor((Date.now() - lastSnapshotAt) / 1000);
       if (ageSeconds >= 10) {
         setStreamBanner(
-          `Waiting for next update... last tick was ${ageSeconds}s ago.`,
+          `Waiting for next quote update... last update was ${ageSeconds}s ago.`,
           "warning",
         );
       }
@@ -700,7 +682,6 @@ function updateStats(summary) {
     statStrength.textContent = "-";
     if (statQuantum) statQuantum.textContent = "-";
     if (statSentiment) statSentiment.textContent = "-";
-    if (statMicrostructure) statMicrostructure.textContent = "-";
     updateExecutionPanel();
     updateChartOverlay();
     return;
@@ -755,15 +736,6 @@ function updateStats(summary) {
     if (sentimentBias === "SELL") statSentiment.classList.add("neg");
   }
 
-  const microBias = String(summary.microstructure_bias || "NEUTRAL").toUpperCase();
-  const microPressure = Number(summary.microstructure_pressure);
-  if (statMicrostructure) {
-    statMicrostructure.textContent = `${microBias} • ${fmtNumber(microPressure, 1)}%`;
-    statMicrostructure.classList.remove("pos", "neg");
-    if (microBias === "BUY") statMicrostructure.classList.add("pos");
-    if (microBias === "SELL") statMicrostructure.classList.add("neg");
-  }
-
   updateExecutionPanel();
   updateChartOverlay();
 }
@@ -809,194 +781,6 @@ function renderMovers(movers) {
   renderMoverList(moversGainersNode, safeMovers.gainers || [], "change");
   renderMoverList(moversLosersNode, safeMovers.losers || [], "change");
   renderMoverList(moversVolumeNode, safeMovers.volume || [], "volume");
-}
-
-function formatTapeTime(timestamp) {
-  if (!timestamp) return "--:--:--";
-  const date = new Date(Number(timestamp));
-  return Number.isNaN(date.getTime())
-    ? "--:--:--"
-    : date.toLocaleTimeString([], { hour12: false });
-}
-
-function renderOrderbookSide(node, levels, side) {
-  if (!node) return;
-
-  if (!Array.isArray(levels) || levels.length === 0) {
-    node.innerHTML = `<tr><td colspan="3" class="mini-empty">No levels.</td></tr>`;
-    return;
-  }
-
-  const sideClass = side === "bid" ? "side-buy" : "side-sell";
-  node.innerHTML = levels
-    .map((level) => `
-      <tr>
-        <td class="${sideClass}">${fmtPrice(level.price)}</td>
-        <td>${fmtQty(level.amount)}</td>
-        <td>${fmtQty(level.total)}</td>
-      </tr>
-    `)
-    .join("");
-}
-
-function renderRecentTrades(trades) {
-  if (!recentTradesBody) return;
-
-  if (!Array.isArray(trades) || trades.length === 0) {
-    recentTradesBody.innerHTML = `<tr><td colspan="4" class="mini-empty">No recent trades.</td></tr>`;
-    return;
-  }
-
-  recentTradesBody.innerHTML = trades
-    .map((trade) => {
-      const side = String(trade.side || "").toLowerCase();
-      const sideLabel = side === "buy" ? "BUY" : side === "sell" ? "SELL" : "-";
-      const sideClass = side === "buy" ? "side-buy" : side === "sell" ? "side-sell" : "";
-
-      return `
-        <tr>
-          <td>${formatTapeTime(trade.timestamp)}</td>
-          <td class="${sideClass}">${sideLabel}</td>
-          <td>${fmtPrice(trade.price)}</td>
-          <td>${fmtQty(trade.amount)}</td>
-        </tr>
-      `;
-    })
-    .join("");
-}
-
-function setTone(node, tone = "") {
-  if (!node) return;
-  node.classList.remove("pos", "neg");
-  if (tone === "pos") node.classList.add("pos");
-  if (tone === "neg") node.classList.add("neg");
-}
-
-function renderChartOrderflowMini(payload) {
-  if (!chartOrderflowMiniNode) return;
-
-  if (!chartDisplaySettings.showMiniTape) {
-    chartOrderflowMiniNode.classList.add("hidden");
-    return;
-  }
-  chartOrderflowMiniNode.classList.remove("hidden");
-
-  const orderbook = payload?.orderbook || {};
-  const bids = Array.isArray(orderbook.bids) ? orderbook.bids : [];
-  const asks = Array.isArray(orderbook.asks) ? orderbook.asks : [];
-  const trades = Array.isArray(payload?.trades) ? payload.trades : [];
-
-  const spreadPct = Number(orderbook.spread_pct);
-  if (chartMiniSpreadNode) {
-    chartMiniSpreadNode.textContent = Number.isFinite(spreadPct)
-      ? `${fmtNumber(spreadPct, 3)}%`
-      : "-";
-    setTone(chartMiniSpreadNode, Number.isFinite(spreadPct) && spreadPct <= 0.08 ? "pos" : "");
-  }
-
-  const bidDepth = bids.slice(0, 6).reduce((sum, level) => sum + (Number(level.amount) || 0), 0);
-  const askDepth = asks.slice(0, 6).reduce((sum, level) => sum + (Number(level.amount) || 0), 0);
-  const depthTotal = bidDepth + askDepth;
-  const imbalancePct = depthTotal > 0 ? ((bidDepth - askDepth) / depthTotal) * 100 : Number.NaN;
-  if (chartMiniImbalanceNode) {
-    chartMiniImbalanceNode.textContent = Number.isFinite(imbalancePct)
-      ? `${fmtNumber(imbalancePct, 1)}%`
-      : "-";
-    setTone(
-      chartMiniImbalanceNode,
-      Number.isFinite(imbalancePct)
-        ? (imbalancePct >= 8 ? "pos" : imbalancePct <= -8 ? "neg" : "")
-        : "",
-    );
-  }
-
-  const buyFlow = trades
-    .filter((trade) => String(trade?.side || "").toLowerCase() === "buy")
-    .reduce((sum, trade) => sum + ((Number(trade.amount) || 0) * (Number(trade.price) || 0)), 0);
-  const sellFlow = trades
-    .filter((trade) => String(trade?.side || "").toLowerCase() === "sell")
-    .reduce((sum, trade) => sum + ((Number(trade.amount) || 0) * (Number(trade.price) || 0)), 0);
-  const tapeTotal = buyFlow + sellFlow;
-  const tapeFlowPct = tapeTotal > 0 ? ((buyFlow - sellFlow) / tapeTotal) * 100 : Number.NaN;
-  if (chartMiniTapeNode) {
-    chartMiniTapeNode.textContent = Number.isFinite(tapeFlowPct)
-      ? `${fmtNumber(tapeFlowPct, 1)}%`
-      : "-";
-    setTone(
-      chartMiniTapeNode,
-      Number.isFinite(tapeFlowPct)
-        ? (tapeFlowPct >= 8 ? "pos" : tapeFlowPct <= -8 ? "neg" : "")
-        : "",
-    );
-  }
-
-  let pressure = "NEUTRAL";
-  let pressureTone = "";
-  if (Number.isFinite(imbalancePct) && Number.isFinite(tapeFlowPct)) {
-    if (imbalancePct >= 10 && tapeFlowPct >= 10) {
-      pressure = "BUY";
-      pressureTone = "pos";
-    } else if (imbalancePct <= -10 && tapeFlowPct <= -10) {
-      pressure = "SELL";
-      pressureTone = "neg";
-    } else {
-      pressure = "MIXED";
-    }
-  }
-  if (chartMiniPressureNode) {
-    chartMiniPressureNode.textContent = pressure;
-    setTone(chartMiniPressureNode, pressureTone);
-  }
-}
-
-function renderOrderflow(orderflow) {
-  const payload = orderflow || {};
-  latestOrderflowPayload = payload;
-  const orderbook = payload.orderbook || {};
-
-  if (orderflowSymbolNode) {
-    orderflowSymbolNode.textContent = payload.symbol || selectedSymbol || "-";
-  }
-
-  renderOrderbookSide(orderbookBidsBody, orderbook.bids || [], "bid");
-  renderOrderbookSide(orderbookAsksBody, orderbook.asks || [], "ask");
-  renderRecentTrades(payload.trades || []);
-
-  const spread = Number(orderbook.spread);
-  const spreadPct = Number(orderbook.spread_pct);
-  const mid = Number(orderbook.mid);
-  const microstructure = payload.microstructure || {};
-  const pressureBias = String(microstructure.pressure_bias || "NEUTRAL").toUpperCase();
-  const pressureScore = Number(microstructure.pressure_score);
-  const hasSpread = !Number.isNaN(spread);
-  const hasSpreadPct = !Number.isNaN(spreadPct);
-  const hasMid = !Number.isNaN(mid);
-
-  if (orderflowMetaNode) {
-    if (hasSpread || hasMid) {
-      const spreadText = hasSpread ? fmtPrice(spread) : "-";
-      const spreadPctText = hasSpreadPct ? `${fmtNumber(spreadPct, 3)}%` : "-";
-      const midText = hasMid ? fmtPrice(mid) : "-";
-      const pressureText = Number.isFinite(pressureScore)
-        ? ` • Pressure: ${pressureBias} ${fmtNumber(pressureScore, 1)}%`
-        : "";
-      orderflowMetaNode.textContent = `Spread: ${spreadText} (${spreadPctText}) • Mid: ${midText}${pressureText}`;
-    } else {
-      orderflowMetaNode.textContent = "Spread: -";
-    }
-  }
-
-  if (orderflowErrorNode) {
-    const message = typeof payload.error === "string" ? payload.error.trim() : "";
-    if (message) {
-      orderflowErrorNode.textContent = message;
-      orderflowErrorNode.classList.add("show");
-    } else {
-      orderflowErrorNode.classList.remove("show");
-    }
-  }
-
-  renderChartOrderflowMini(payload);
 }
 
 function setChartOverlayValue(node, text, tone = "") {
@@ -1077,8 +861,6 @@ function estimateRankScore(summary, autoTrade, side) {
 }
 
 function updateChartOverlay() {
-  if (!chartOverlaySpreadNode || !chartOverlayEdgeNode || !chartOverlayRankNode) return;
-
   const summary = currentSummary;
   const autoTrade = latestAutoTrade || {};
   const structure = latestStructure || {};
@@ -1129,47 +911,53 @@ function updateChartOverlay() {
     return;
   }
 
-  const spreadPct = Number(summary.spread_pct);
-  const maxSpreadPct = Number(autoTrade.max_spread_pct);
-  const spreadTone = Number.isFinite(spreadPct) && Number.isFinite(maxSpreadPct) && spreadPct > maxSpreadPct
-    ? "neg"
-    : Number.isFinite(spreadPct)
-      ? "pos"
-      : "";
-  setChartOverlayValue(
-    chartOverlaySpreadNode,
-    `Spread: ${Number.isFinite(spreadPct) ? `${fmtNumber(spreadPct, 3)}%` : "-"}`,
-    spreadTone,
-  );
+  if (chartOverlaySpreadNode) {
+    const spreadPct = Number(summary.spread_pct);
+    const maxSpreadPct = Number(autoTrade.max_spread_pct);
+    const spreadTone = Number.isFinite(spreadPct) && Number.isFinite(maxSpreadPct) && spreadPct > maxSpreadPct
+      ? "neg"
+      : Number.isFinite(spreadPct)
+        ? "pos"
+        : "";
+    setChartOverlayValue(
+      chartOverlaySpreadNode,
+      `Spread: ${Number.isFinite(spreadPct) ? `${fmtNumber(spreadPct, 3)}%` : "-"}`,
+      spreadTone,
+    );
+  }
 
-  const longEdge = estimateExpectedEdgePct(summary, autoTrade, "LONG");
-  const shortEdge = estimateExpectedEdgePct(summary, autoTrade, "SHORT");
-  const bestEdge = Math.max(
-    Number.isFinite(longEdge) ? longEdge : Number.NEGATIVE_INFINITY,
-    Number.isFinite(shortEdge) ? shortEdge : Number.NEGATIVE_INFINITY,
-  );
-  const minEdge = Number(autoTrade.min_edge_pct);
-  const edgeTone = Number.isFinite(bestEdge) && Number.isFinite(minEdge) && bestEdge < minEdge
-    ? "neg"
-    : Number.isFinite(bestEdge)
-      ? "pos"
-      : "";
-  setChartOverlayValue(
-    chartOverlayEdgeNode,
-    `Edge L/S: ${Number.isFinite(longEdge) ? `${fmtNumber(longEdge, 3)}%` : "-"} / ${
-      Number.isFinite(shortEdge) ? `${fmtNumber(shortEdge, 3)}%` : "-"
-    }`,
-    edgeTone,
-  );
+  if (chartOverlayEdgeNode) {
+    const longEdge = estimateExpectedEdgePct(summary, autoTrade, "LONG");
+    const shortEdge = estimateExpectedEdgePct(summary, autoTrade, "SHORT");
+    const bestEdge = Math.max(
+      Number.isFinite(longEdge) ? longEdge : Number.NEGATIVE_INFINITY,
+      Number.isFinite(shortEdge) ? shortEdge : Number.NEGATIVE_INFINITY,
+    );
+    const minEdge = Number(autoTrade.min_edge_pct);
+    const edgeTone = Number.isFinite(bestEdge) && Number.isFinite(minEdge) && bestEdge < minEdge
+      ? "neg"
+      : Number.isFinite(bestEdge)
+        ? "pos"
+        : "";
+    setChartOverlayValue(
+      chartOverlayEdgeNode,
+      `Edge L/S: ${Number.isFinite(longEdge) ? `${fmtNumber(longEdge, 3)}%` : "-"} / ${
+        Number.isFinite(shortEdge) ? `${fmtNumber(shortEdge, 3)}%` : "-"
+      }`,
+      edgeTone,
+    );
+  }
 
-  const longRank = estimateRankScore(summary, autoTrade, "LONG");
-  const shortRank = estimateRankScore(summary, autoTrade, "SHORT");
-  setChartOverlayValue(
-    chartOverlayRankNode,
-    `Rank L/S: ${Number.isFinite(longRank) ? fmtNumber(longRank, 1) : "-"} / ${
-      Number.isFinite(shortRank) ? fmtNumber(shortRank, 1) : "-"
-    }`,
-  );
+  if (chartOverlayRankNode) {
+    const longRank = estimateRankScore(summary, autoTrade, "LONG");
+    const shortRank = estimateRankScore(summary, autoTrade, "SHORT");
+    setChartOverlayValue(
+      chartOverlayRankNode,
+      `Rank L/S: ${Number.isFinite(longRank) ? fmtNumber(longRank, 1) : "-"} / ${
+        Number.isFinite(shortRank) ? fmtNumber(shortRank, 1) : "-"
+      }`,
+    );
+  }
 }
 
 function setMtfChip(node, label, bias) {
@@ -1580,15 +1368,12 @@ function applyChartSettingButtons() {
   const mappings = [
     { btn: presetToggleSrBtn, enabled: chartDisplaySettings.showSr, on: "S/R ON", off: "S/R OFF" },
     { btn: presetToggleTrendBtn, enabled: chartDisplaySettings.showTrend, on: "Trend ON", off: "Trend OFF" },
-    { btn: presetToggleMiniBtn, enabled: chartDisplaySettings.showMiniTape, on: "Mini Tape ON", off: "Mini Tape OFF" },
   ];
   mappings.forEach((item) => {
     if (!item.btn) return;
     item.btn.classList.toggle("active", item.enabled);
     item.btn.textContent = item.enabled ? item.on : item.off;
   });
-
-  renderChartOrderflowMini(latestOrderflowPayload || {});
 }
 
 function setPresetStatus(text, tone = "") {
@@ -1628,7 +1413,6 @@ function saveCurrentPreset() {
     timeframe: selectedTimeframe,
     showSr: chartDisplaySettings.showSr,
     showTrend: chartDisplaySettings.showTrend,
-    showMiniTape: chartDisplaySettings.showMiniTape,
   };
   next[symbolKey] = symbolPresets;
   savePresetStore(next);
@@ -1653,7 +1437,6 @@ function applyPresetByName(name) {
 
   chartDisplaySettings.showSr = Boolean(preset.showSr);
   chartDisplaySettings.showTrend = Boolean(preset.showTrend);
-  chartDisplaySettings.showMiniTape = Boolean(preset.showMiniTape);
   applyChartSettingButtons();
 
   const timeframe = String(preset.timeframe || "").trim();
@@ -2347,7 +2130,7 @@ function rebuildChartSeriesLookup(chart) {
 function markerForJournalEntry(entry) {
   const eventType = String(entry?.event_type || "").toUpperCase();
   const side = String(entry?.side || "").toUpperCase();
-  const pnl = Number(entry?.pnl_usdt);
+  const pnl = Number(entry?.pnl_usd);
   const reason = String(entry?.reason || "").toUpperCase();
   const isProfit = Number.isFinite(pnl) ? pnl >= 0 : true;
 
@@ -2963,7 +2746,6 @@ function updateExecutionPanel() {
     execOutAiGate,
     execOutQuantum,
     execOutSentiment,
-    execOutMicrostructure,
     execOutStrengthGate,
     execOutVolumeGate,
     execOutEmaGate,
@@ -3021,10 +2803,6 @@ function updateExecutionPanel() {
   const sentimentBias = String(currentSummary.sentiment_bias || "HOLD").toUpperCase();
   const sentimentScore = Number(currentSummary.sentiment_score);
   const sentimentConfidence = Number(currentSummary.sentiment_confidence);
-  const microBias = String(currentSummary.microstructure_bias || "NEUTRAL").toUpperCase();
-  const microPressure = Number(currentSummary.microstructure_pressure);
-  const depthImbalance = Number(currentSummary.depth_imbalance_pct);
-  const tradeImbalance = Number(currentSummary.trade_imbalance_pct);
 
   const minStrength = Number(auto.min_strength_confidence);
   const minVolumeRatio = Number(auto.min_volume_ratio);
@@ -3101,8 +2879,8 @@ function updateExecutionPanel() {
     || openPositions < maxOpenPositions
   );
 
-  const dailyLossLimit = Number(auto.daily_loss_limit_usdt);
-  const dailyPnl = Number(auto.daily_pnl_usdt);
+  const dailyLossLimit = Number(auto.daily_loss_limit_usd);
+  const dailyPnl = Number(auto.daily_pnl_usd);
   const riskUsed = Number.isFinite(dailyPnl) ? Math.max(0, -dailyPnl) : Number.NaN;
   const riskLeft = (
     Number.isFinite(dailyLossLimit) && Number.isFinite(riskUsed)
@@ -3171,7 +2949,7 @@ function updateExecutionPanel() {
     }
     const pnlText = Number.isFinite(activePositionPnl) ? fmtMoney(activePositionPnl) : "-";
     activePositionText = (
-      `${positionSide} @ ${fmtPrice(entryPrice)} • qty ${fmtQty(amount)} • PnL ${pnlText}`
+      `${positionSide} @ ${fmtPrice(entryPrice)} • shares ${fmtQty(amount)} • PnL ${pnlText}`
     );
   }
 
@@ -3188,10 +2966,6 @@ function updateExecutionPanel() {
   const sentimentGateText = Boolean(auto.sentiment_enabled)
     ? `${sentimentBias} • score ${fmtNumber(sentimentScore, 1)} • conf ${fmtNumber(sentimentConfidence, 0)}%`
     : "OFF";
-  const microstructureGateText = (
-    `${microBias} • pressure ${fmtNumber(microPressure, 1)}% `
-    + `• depth ${fmtNumber(depthImbalance, 1)}% • tape ${fmtNumber(tradeImbalance, 1)}%`
-  );
   const strengthGateText = (
     Number.isFinite(minStrength) && minStrength > 0
       ? `${strengthPass ? "PASS" : "BLOCK"} • ${fmtNumber(strengthConfidence, 0)}% / min ${fmtNumber(minStrength, 0)}%`
@@ -3230,7 +3004,6 @@ function updateExecutionPanel() {
   setExecutionOutput(execOutAiGate, aiGateText);
   setExecutionOutput(execOutQuantum, quantumGateText);
   setExecutionOutput(execOutSentiment, sentimentGateText);
-  setExecutionOutput(execOutMicrostructure, microstructureGateText);
   setExecutionOutput(execOutStrengthGate, strengthGateText);
   setExecutionOutput(execOutVolumeGate, volumeGateText);
   setExecutionOutput(execOutEmaGate, emaGateText);
@@ -3283,10 +3056,6 @@ function updateExecutionPanel() {
     Boolean(auto.sentiment_enabled)
       ? (sentimentBias === "BUY" || sentimentBias === "SELL" ? sentimentBias === aiBias : null)
       : null,
-  );
-  setExecutionGateTone(
-    execOutMicrostructure,
-    microBias === "BUY" || microBias === "SELL" ? microBias === aiBias : null,
   );
   setExecutionGateTone(
     execOutStrengthGate,
@@ -3607,9 +3376,9 @@ function renderTradeJournalRows(entries) {
       const eventType = escapeHtml(entry.event_type || "-");
       const side = escapeHtml(String(entry.side || "-").toUpperCase());
       const price = fmtPrice(entry.price);
-      const qty = fmtQty(entry.amount);
-      const notional = entry.notional_usdt == null ? "-" : fmtMoney(entry.notional_usdt);
-      const pnl = fmtPnlUsdt(entry.pnl_usdt);
+      const shares = fmtQty(entry.amount);
+      const notional = entry.notional_usd == null ? "-" : fmtMoney(entry.notional_usd);
+      const pnl = fmtPnlUsd(entry.pnl_usd);
       const reason = escapeHtml(entry.reason || "-");
 
       return `
@@ -3619,7 +3388,7 @@ function renderTradeJournalRows(entries) {
           <td>${eventType}</td>
           <td>${side}</td>
           <td>${price}</td>
-          <td>${qty}</td>
+          <td>${shares}</td>
           <td>${notional}</td>
           <td>${pnl}</td>
           <td>${reason}</td>
@@ -3686,18 +3455,18 @@ function renderAutoTrade(payload) {
   const exchange = String(data.exchange || "-");
   const openPositions = Number(data.open_positions || 0);
   const maxOpenPositions = Number(data.max_open_positions);
-  const dailyPnl = Number(data.daily_pnl_usdt);
-  const dailyPnl30d = Number(data.daily_pnl_30d_usdt);
+  const dailyPnl = Number(data.daily_pnl_usd);
+  const dailyPnl30d = Number(data.daily_pnl_30d_usd);
   const dailyPnlHistoryDays = Number(data.daily_pnl_history_days || 30);
   const dailyPnlHistory = Array.isArray(data.daily_pnl_history) ? data.daily_pnl_history : [];
-  const lossLimit = Number(data.daily_loss_limit_usdt);
+  const lossLimit = Number(data.daily_loss_limit_usd);
   const lossLimitBasis = String(data.daily_loss_limit_basis || "");
   const maxDailyLossPct = Number(data.max_daily_loss_pct);
-  const tradeSizeUsdt = Number(data.trade_size_usdt);
-  const tradeSizeUsdtMin = Number(data.trade_size_usdt_min);
-  const tradeSizeUsdtMax = Number(data.trade_size_usdt_max);
+  const tradeSizeUsd = Number(data.trade_size_usd);
+  const tradeSizeUsdMin = Number(data.trade_size_usd_min);
+  const tradeSizeUsdMax = Number(data.trade_size_usd_max);
   const tradeSizePercent = Number(data.trade_size_percent);
-  const minNotionalUsdt = Number(data.min_notional_usdt);
+  const minNotionalUsd = Number(data.min_notional_usd);
   const strategyModeRaw = String(data.strategy_mode || "long_only");
   const shortEnabled = Boolean(data.short_enabled);
   const takeProfitRunEnabled = Boolean(data.take_profit_run_enabled);
@@ -3710,8 +3479,6 @@ function renderAutoTrade(payload) {
   const aiFilterEnabled = Boolean(data.ai_filter_enabled);
   const aiFilterMinConfidence = Number(data.ai_filter_min_confidence);
   const aiFilterMinScoreAbs = Number(data.ai_filter_min_score_abs);
-  const autoConvertToUsdt = Boolean(data.auto_convert_to_usdt);
-  const autoConvertMinUsdt = Number(data.auto_convert_min_usdt);
   const riskMultiplier = Number(data.risk_multiplier);
   const guardrailActive = Boolean(data.guardrail_active);
   const guardrailHaltEnabled = Boolean(data.forward_guardrail_halt_enabled);
@@ -3743,9 +3510,9 @@ function renderAutoTrade(payload) {
   const maxDrawdownLimitPct = Number(data.max_drawdown_limit_pct);
   const profitLockEnabled = Boolean(data.profit_lock_enabled);
   const profitLockActive = Boolean(data.profit_lock_active);
-  const profitLockTriggerUsdt = Number(data.profit_lock_trigger_usdt);
+  const profitLockTriggerUsd = Number(data.profit_lock_trigger_usd);
   const profitLockGivebackPct = Number(data.profit_lock_giveback_pct);
-  const dailyPeakPnlUsdt = Number(data.daily_peak_pnl_usdt);
+  const dailyPeakPnlUsd = Number(data.daily_peak_pnl_usd);
   const entryQualityEnabled = Boolean(data.entry_quality_enabled);
   const minEntryScore = Number(data.min_entry_score);
   const minEntryProbability = Number(data.min_entry_probability);
@@ -3755,15 +3522,6 @@ function renderAutoTrade(payload) {
   const lstmLearningEnabled = Boolean(data.lstm_learning_enabled);
   const lstmStateCount = Number(data.lstm_state_count || 0);
   const lstmUpdateCount = Number(data.lstm_update_count || 0);
-  const copyTradeEnabled = Boolean(data.copy_trade_enabled);
-  const copyTradeFollowers = Array.isArray(data.copy_trade_followers)
-    ? data.copy_trade_followers
-    : [];
-  const copyTradeSlippageBps = Number(data.copy_trade_slippage_bps);
-  const copyTradeRecentEvents = Array.isArray(data.copy_trade_recent_events)
-    ? data.copy_trade_recent_events
-    : [];
-  const copyTradeOpenPositions = data.copy_trade_open_positions || {};
   const strategyLabel = strategyModeRaw === "both"
     ? "LONG+SHORT"
     : strategyModeRaw === "short_only"
@@ -3812,8 +3570,8 @@ function renderAutoTrade(payload) {
         ? `${Math.trunc(dailyPnlHistoryDays)}D`
         : "30D"
     );
-    const todayText = hasPnl ? `Today ${fmtPnlUsdt(dailyPnl)}` : "Today -";
-    const lookbackText = hasPnl30d ? `${historyLabel} ${fmtPnlUsdt(dailyPnl30d)}` : `${historyLabel} -`;
+    const todayText = hasPnl ? `Today ${fmtPnlUsd(dailyPnl)}` : "Today -";
+    const lookbackText = hasPnl30d ? `${historyLabel} ${fmtPnlUsd(dailyPnl30d)}` : `${historyLabel} -`;
     autoTradePnlNode.textContent = `${todayText} • ${lookbackText}`;
     autoTradePnlNode.classList.remove("pos", "neg");
     if (hasPnl && dailyPnl > 0) autoTradePnlNode.classList.add("pos");
@@ -3828,7 +3586,7 @@ function renderAutoTrade(payload) {
       autoTradeDailyPnlHistoryNode.innerHTML = dailyPnlHistory
         .map((entry) => {
           const dayKey = escapeHtml(String(entry?.day_key || "-"));
-          const pnlValue = Number(entry?.pnl_usdt);
+          const pnlValue = Number(entry?.pnl_usd);
           const pnlClass = Number.isNaN(pnlValue)
             ? ""
             : pnlValue > 0
@@ -3836,7 +3594,7 @@ function renderAutoTrade(payload) {
               : pnlValue < 0
                 ? "neg"
                 : "";
-          const pnlText = fmtPnlUsdt(pnlValue);
+          const pnlText = fmtPnlUsd(pnlValue);
           return `
             <tr>
               <td>${dayKey}</td>
@@ -3851,17 +3609,17 @@ function renderAutoTrade(payload) {
   if (autoTradeRiskNode) {
     const limitText = Number.isNaN(lossLimit)
       ? "-"
-      : `-${lossLimit.toFixed(2)} USDT${lossLimitBasis ? ` (${lossLimitBasis})` : ""}`;
+      : `-${lossLimit.toFixed(2)} USD${lossLimitBasis ? ` (${lossLimitBasis})` : ""}`;
     const sizeRangeText =
-      !Number.isNaN(tradeSizeUsdtMin) &&
-      !Number.isNaN(tradeSizeUsdtMax) &&
-      tradeSizeUsdtMax >= tradeSizeUsdtMin
-        ? `${fmtNumber(tradeSizeUsdtMin, 2)}-${fmtNumber(tradeSizeUsdtMax, 2)} USDT`
-        : (!Number.isNaN(tradeSizeUsdt) ? `${fmtNumber(tradeSizeUsdt, 2)} USDT` : "-");
+      !Number.isNaN(tradeSizeUsdMin) &&
+      !Number.isNaN(tradeSizeUsdMax) &&
+      tradeSizeUsdMax >= tradeSizeUsdMin
+        ? `${fmtNumber(tradeSizeUsdMin, 2)}-${fmtNumber(tradeSizeUsdMax, 2)} USD`
+        : (!Number.isNaN(tradeSizeUsd) ? `${fmtNumber(tradeSizeUsd, 2)} USD` : "-");
     const sizeText = !Number.isNaN(tradeSizePercent) && tradeSizePercent > 0
       ? `${fmtNumber(tradeSizePercent, 2)}%`
       : sizeRangeText;
-    const minText = Number.isNaN(minNotionalUsdt) ? "-" : `${fmtNumber(minNotionalUsdt, 2)} USDT`;
+    const minText = Number.isNaN(minNotionalUsd) ? "-" : `${fmtNumber(minNotionalUsd, 2)} USD`;
     const aiText = aiFilterEnabled
       ? `AI ON (>=${Number.isNaN(aiFilterMinConfidence) ? "-" : aiFilterMinConfidence}% / abs ${Number.isNaN(aiFilterMinScoreAbs) ? "-" : fmtNumber(aiFilterMinScoreAbs, 2)})`
       : "AI OFF";
@@ -3882,9 +3640,6 @@ function renderAutoTrade(payload) {
         + `${guardrailHaltEnabled ? "" : " size-only"}`
       )
       : "Guardrail OFF";
-    const autoConvertText = autoConvertToUsdt
-      ? `Auto USDT ON (>=${Number.isNaN(autoConvertMinUsdt) ? "-" : fmtNumber(autoConvertMinUsdt, 2)} USDT)`
-      : "Auto USDT OFF";
     const streakText = (
       `Streak W${Number.isNaN(consecutiveWins) ? 0 : consecutiveWins}`
       + `/L${Number.isNaN(consecutiveLosses) ? 0 : consecutiveLosses}`
@@ -3918,7 +3673,7 @@ function renderAutoTrade(payload) {
       : maxOpenPositions <= 0
         ? `${openPositions}/Unlimited`
         : `${openPositions}/${maxOpenPositions}`;
-    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${tpRunText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${autoConvertText} • ${streakText} • Open ${openText}`;
+    autoTradeRiskNode.textContent = `Size ${sizeText} • Min ${minText} • Limit ${limitText} • ${shortText} • ${tpRunText} • ${aiText} • ${adaptiveText} • ${guardrailText} • ${streakText} • Open ${openText}`;
   }
 
   if (autoTradeSymbolsNode) {
@@ -3929,7 +3684,7 @@ function renderAutoTrade(payload) {
     if (selected && selected.entry_price && selected.amount) {
       const side = String(selected.side || "LONG").toUpperCase();
       autoTradeSelectedNode.textContent =
-        `${side} • Entry ${fmtPrice(selected.entry_price)} • Qty ${fmtQty(selected.amount)}`;
+        `${side} • Entry ${fmtPrice(selected.entry_price)} • Shares ${fmtQty(selected.amount)}`;
     } else {
       autoTradeSelectedNode.textContent = "No open position";
     }
@@ -3945,27 +3700,6 @@ function renderAutoTrade(payload) {
     autoTradeAdaptiveNode.textContent = `${adaptiveLabel}${adaptiveDetail}`;
   }
 
-  if (autoTradeCopyNode) {
-    if (!copyTradeEnabled) {
-      autoTradeCopyNode.textContent = "OFF";
-    } else {
-      const followerLabel = copyTradeFollowers.length > 0
-        ? copyTradeFollowers
-            .map((follower) => {
-              const name = String(follower.name || "-");
-              const multiplier = Number(follower.multiplier);
-              const openCount = Number(copyTradeOpenPositions[name] || 0);
-              return `${name} x${Number.isNaN(multiplier) ? "-" : fmtNumber(multiplier, 2)} (open ${openCount})`;
-            })
-            .join(", ")
-        : "No followers";
-      const slippageLabel = Number.isNaN(copyTradeSlippageBps)
-        ? "-"
-        : fmtNumber(copyTradeSlippageBps, 1);
-      autoTradeCopyNode.textContent = `${followerLabel} • slippage ${slippageLabel}bps`;
-    }
-  }
-
   if (autoTradeAdvancedRiskNode) {
     const kellyText = kellyEnabled
       ? `Kelly cap ${Number.isFinite(kellyMaxFractionPct) ? fmtNumber(kellyMaxFractionPct, 2) : "-"}%`
@@ -3979,8 +3713,8 @@ function renderAutoTrade(payload) {
     const profitLockText = profitLockEnabled
       ? (
         `Profit Lock ${profitLockActive ? "ON" : "READY"} `
-        + `peak ${Number.isFinite(dailyPeakPnlUsdt) ? fmtPnlUsdt(dailyPeakPnlUsdt) : "-"} `
-        + `trigger ${Number.isFinite(profitLockTriggerUsdt) ? fmtNumber(profitLockTriggerUsdt, 2) : "-"} `
+        + `peak ${Number.isFinite(dailyPeakPnlUsd) ? fmtPnlUsd(dailyPeakPnlUsd) : "-"} `
+        + `trigger ${Number.isFinite(profitLockTriggerUsd) ? fmtNumber(profitLockTriggerUsd, 2) : "-"} `
         + `giveback ${Number.isFinite(profitLockGivebackPct) ? fmtNumber(profitLockGivebackPct, 0) : "-"}%`
       )
       : "Profit Lock OFF";
@@ -4062,7 +3796,7 @@ function renderAutoTrade(payload) {
           const symbol = escapeHtml(event.symbol || "-");
           const action = escapeHtml(event.action || "-");
           const message = escapeHtml(event.message || "-");
-          const pnl = fmtPnlUsdt(event.pnl_usdt);
+          const pnl = fmtPnlUsd(event.pnl_usd);
           const mode = escapeHtml(String(event.mode || "-").toUpperCase());
           return `
             <tr>
@@ -4072,33 +3806,6 @@ function renderAutoTrade(payload) {
               <td>${message}</td>
               <td>${pnl}</td>
               <td>${mode}</td>
-            </tr>
-          `;
-        })
-        .join("");
-    }
-  }
-
-  if (copyTradeEventsNode) {
-    if (!copyTradeEnabled || copyTradeRecentEvents.length === 0) {
-      copyTradeEventsNode.innerHTML =
-        `<tr><td colspan="5" class="mini-empty">No copy-trade events yet.</td></tr>`;
-    } else {
-      const copyEvents = [...copyTradeRecentEvents].reverse().slice(0, 30);
-      copyTradeEventsNode.innerHTML = copyEvents
-        .map((event) => {
-          const ts = formatAlertTime(event.timestamp);
-          const follower = escapeHtml(event.follower || "-");
-          const symbol = escapeHtml(event.symbol || "-");
-          const action = escapeHtml(event.event_type || "-");
-          const pnl = fmtPnlUsdt(event.pnl_usdt);
-          return `
-            <tr>
-              <td>${ts}</td>
-              <td>${follower}</td>
-              <td>${symbol}</td>
-              <td>${action}</td>
-              <td>${pnl}</td>
             </tr>
           `;
         })
@@ -4118,13 +3825,13 @@ function renderWallet(payload) {
   const enabled = Boolean(data.enabled);
   const connected = Boolean(data.connected);
   const exchange = String(data.exchange || "-").toUpperCase();
-  const totalUsdtEstimate = Number(data.total_usdt_estimate);
-  const dailyPnlEstimateUsdt = Number(data.daily_pnl_estimate_usdt);
+  const totalUsdEstimate = Number(data.total_usd_estimate);
+  const dailyPnlEstimateUsd = Number(data.daily_pnl_estimate_usd);
   const dailyPnlEstimatePct = Number(data.daily_pnl_estimate_pct);
-  const dayStartTotalUsdt = Number(data.day_start_total_usdt);
+  const dayStartTotalUsd = Number(data.day_start_total_usd);
   const pnlDayKey = String(data.pnl_day_key || "");
-  const usdtFree = Number(data.usdt_free);
-  const usdtTotal = Number(data.usdt_total);
+  const usdFree = Number(data.usd_free);
+  const usdTotal = Number(data.usd_total);
   const assetCount = Number(data.asset_count || 0);
   const assets = Array.isArray(data.assets) ? data.assets : [];
   const message = typeof data.error === "string" ? data.error.trim() : "";
@@ -4132,7 +3839,7 @@ function renderWallet(payload) {
   if (walletStatusNode) {
     walletStatusNode.classList.remove("pos", "neg");
     if (!enabled) {
-      walletStatusNode.textContent = "No API Key";
+      walletStatusNode.textContent = "Disabled";
       walletStatusNode.classList.add("neg");
     } else if (!connected) {
       walletStatusNode.textContent = "Disconnected";
@@ -4148,20 +3855,20 @@ function renderWallet(payload) {
   }
 
   if (walletTotalNode) {
-    walletTotalNode.textContent = Number.isNaN(totalUsdtEstimate)
+    walletTotalNode.textContent = Number.isNaN(totalUsdEstimate)
       ? "-"
-      : fmtMoney(totalUsdtEstimate);
+      : fmtMoney(totalUsdEstimate);
   }
 
   if (walletDailyPnlNode) {
     walletDailyPnlNode.classList.remove("pos", "neg");
-    if (Number.isNaN(dailyPnlEstimateUsdt)) {
+    if (Number.isNaN(dailyPnlEstimateUsd)) {
       walletDailyPnlNode.textContent = "-";
     } else {
-      const absMoney = fmtMoney(Math.abs(dailyPnlEstimateUsdt));
-      const moneyText = dailyPnlEstimateUsdt > 0
+      const absMoney = fmtMoney(Math.abs(dailyPnlEstimateUsd));
+      const moneyText = dailyPnlEstimateUsd > 0
         ? `+${absMoney}`
-        : dailyPnlEstimateUsdt < 0
+        : dailyPnlEstimateUsd < 0
           ? `-${absMoney}`
           : fmtMoney(0);
       const pctText = Number.isNaN(dailyPnlEstimatePct)
@@ -4169,24 +3876,24 @@ function renderWallet(payload) {
         : ` (${dailyPnlEstimatePct > 0 ? "+" : ""}${dailyPnlEstimatePct.toFixed(2)}%)`;
       walletDailyPnlNode.textContent = `${moneyText}${pctText}`;
 
-      if (dailyPnlEstimateUsdt > 0) walletDailyPnlNode.classList.add("pos");
-      if (dailyPnlEstimateUsdt < 0) walletDailyPnlNode.classList.add("neg");
+      if (dailyPnlEstimateUsd > 0) walletDailyPnlNode.classList.add("pos");
+      if (dailyPnlEstimateUsd < 0) walletDailyPnlNode.classList.add("neg");
     }
   }
 
   if (walletDayStartNode) {
-    if (Number.isNaN(dayStartTotalUsdt)) {
+    if (Number.isNaN(dayStartTotalUsd)) {
       walletDayStartNode.textContent = "-";
     } else {
       const keyText = pnlDayKey ? ` (UTC ${pnlDayKey})` : "";
-      walletDayStartNode.textContent = `${fmtMoney(dayStartTotalUsdt)}${keyText}`;
+      walletDayStartNode.textContent = `${fmtMoney(dayStartTotalUsd)}${keyText}`;
     }
   }
 
-  if (walletUsdtNode) {
-    const freeText = Number.isNaN(usdtFree) ? "-" : fmtMoney(usdtFree);
-    const totalText = Number.isNaN(usdtTotal) ? "-" : fmtMoney(usdtTotal);
-    walletUsdtNode.textContent = `${freeText} / ${totalText}`;
+  if (walletUsdNode) {
+    const freeText = Number.isNaN(usdFree) ? "-" : fmtMoney(usdFree);
+    const totalText = Number.isNaN(usdTotal) ? "-" : fmtMoney(usdTotal);
+    walletUsdNode.textContent = `${freeText} / ${totalText}`;
   }
 
   if (walletAssetCountNode) {
@@ -4205,7 +3912,7 @@ function renderWallet(payload) {
   if (!walletAssetsBody) return;
 
   if (!connected || assets.length === 0) {
-    const emptyText = message || "No wallet asset data available.";
+    const emptyText = message || "No portfolio data available.";
     walletAssetsBody.innerHTML =
       `<tr><td colspan="5" class="mini-empty">${escapeHtml(emptyText)}</td></tr>`;
     return;
@@ -4217,7 +3924,7 @@ function renderWallet(payload) {
       const free = fmtQty(asset.free);
       const used = fmtQty(asset.used);
       const total = fmtQty(asset.total);
-      const estUsdt = asset.usdt_value == null ? "-" : fmtMoney(asset.usdt_value);
+      const estUsd = asset.usd_value == null ? "-" : fmtMoney(asset.usd_value);
 
       return `
         <tr>
@@ -4225,7 +3932,7 @@ function renderWallet(payload) {
           <td>${free}</td>
           <td>${used}</td>
           <td>${total}</td>
-          <td>${estUsdt}</td>
+          <td>${estUsd}</td>
         </tr>
       `;
     })
@@ -4341,7 +4048,6 @@ function handleSnapshot(payload) {
   marketRows = Array.isArray(payload.market) ? payload.market : [];
   renderWatchlist(marketRows);
   renderMovers(payload.movers);
-  renderOrderflow(payload.orderflow);
   renderWallet(payload.wallet);
 
   const summary = payload.summary || marketRows.find((row) => row.symbol === selectedSymbol) || null;
@@ -4374,15 +4080,15 @@ function connectWebSocket() {
   }
 
   setStatus("Connecting...", false);
-  setStreamBanner("Connecting to live stream...", "info");
-  lastUpdateNode.textContent = "Waiting for live tick...";
+  setStreamBanner("Connecting to quote feed...", "info");
+  lastUpdateNode.textContent = "Waiting for quote update...";
 
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     reconnectAttempt = 0;
     setStatus("Connected", true);
-    setStreamBanner("Live stream connected. Waiting for first tick...", "info");
+    setStreamBanner("Quote feed connected. Waiting for first update...", "info");
     sendViewUpdate();
   };
 
@@ -4391,9 +4097,9 @@ function connectWebSocket() {
       const payload = JSON.parse(event.data);
 
       if (payload.type === "error") {
-        setStatus("Live stream issue", false);
+        setStatus("Quote feed issue", false);
         setStreamBanner(
-          payload.message || "Server error received from websocket stream.",
+          payload.message || "Server error received from quote feed.",
           "error-state",
         );
         lastUpdateNode.textContent = `Server error: ${payload.message || "Unknown"}`;
@@ -4593,14 +4299,6 @@ if (presetToggleTrendBtn) {
     applyChartSettingButtons();
     refreshChartDecorations();
     updateChartOverlay();
-  });
-}
-
-if (presetToggleMiniBtn) {
-  presetToggleMiniBtn.addEventListener("click", () => {
-    chartDisplaySettings.showMiniTape = !chartDisplaySettings.showMiniTape;
-    applyChartSettingButtons();
-    renderChartOrderflowMini(latestOrderflowPayload || {});
   });
 }
 
